@@ -1,0 +1,6 @@
+/build/
+/dist/
+/assets/samples/A-TRIER/
+__pycache__/
+.DS_Store
+*.zip

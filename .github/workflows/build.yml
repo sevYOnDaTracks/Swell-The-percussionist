@@ -1,0 +1,43 @@
+name: Build Swell The Percussionist
+on: [push, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure Windows
+        if: runner.os == 'Windows'
+        run: cmake -S . -B build -A x64
+      - name: Configure universal Mac
+        if: runner.os == 'macOS'
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64' -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+      - run: cmake --build build --config Release --parallel 3
+      - run: ctest --test-dir build -C Release --output-on-failure
+      - name: Sign and package macOS bundles
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p package
+          cd build/SwellPercussionist_artefacts/Release
+          for bundle in "AU/Swell The Percussionist.component" "VST3/Swell The Percussionist.vst3" "Standalone/Swell The Percussionist.app"; do
+            codesign --force --deep -s - "$bundle"
+            codesign --verify --deep --strict "$bundle"
+          done
+          ditto -c -k --keepParent VST3 ../../../package/Swell-The-Percussionist-macOS-VST3.zip
+          ditto -c -k --keepParent AU ../../../package/Swell-The-Percussionist-macOS-AU.zip
+          ditto -c -k --keepParent Standalone ../../../package/Swell-The-Percussionist-macOS-Standalone.zip
+      - name: Package Windows binaries
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path package -Force
+          Compress-Archive -Path 'build/SwellPercussionist_artefacts/Release/VST3/*.vst3', 'build/SwellPercussionist_artefacts/Release/Standalone/*.exe' -DestinationPath 'package/Swell-The-Percussionist-Windows.zip'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Swell-The-Percussionist-${{ runner.os }}
+          path: package/*.zip
+          if-no-files-found: error
