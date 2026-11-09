@@ -113,6 +113,37 @@ private:
     bool statusIsError = false;
 };
 
+// Écran d'activation posé par-dessus n'importe quelle fenêtre de plugin, en une ligne :
+//     return swell::LicenceGuard::attach (new MonEditeur (*this));   // dans createEditor()
+// ou bien, comme membre de l'éditeur :  swell::LicenceGuard licenceGuard { *this };
+// Il suit la taille de la fenêtre (réduit si elle est petite) et reste au premier plan.
+class LicenceGuard : private juce::ComponentListener, private juce::AsyncUpdater
+{
+public:
+    explicit LicenceGuard (juce::Component& editor, LicencePanel::Style style = defaultStyle());
+    ~LicenceGuard() override;
+    static LicencePanel::Style defaultStyle();
+
+    // Accroche une garde à l'éditeur ; elle disparaît avec lui.
+    template <typename Editor>
+    static Editor* attach (Editor* editor)
+    {
+        (new LicenceGuard (*editor))->ownedByEditor = true;
+        return editor;
+    }
+
+private:
+    void componentMovedOrResized (juce::Component&, bool, bool) override { layout(); }
+    void componentChildrenChanged (juce::Component&) override { triggerAsyncUpdate(); }
+    void componentBeingDeleted (juce::Component&) override { if (ownedByEditor) delete this; }
+    void handleAsyncUpdate() override { if (panel.isVisible()) panel.toFront (false); }
+    void layout();
+
+    juce::Component& editor;
+    LicencePanel panel;
+    bool ownedByEditor = false;
+};
+
 // « Licence : Prénom Nom », ou « Essai : 5 jours restants · Acheter » ; un clic ouvre le menu.
 class LicenceBadge : public juce::Component, private juce::ChangeListener, private juce::Timer
 {

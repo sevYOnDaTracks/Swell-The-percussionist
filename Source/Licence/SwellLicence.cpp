@@ -411,6 +411,39 @@ void LicencePanel::changeListenerCallback (juce::ChangeBroadcaster*)
     if (show) { toFront (false); repaint(); }
 }
 
+// ---------------------------------------------------------------- Garde (écran par-dessus n'importe quel éditeur)
+
+LicencePanel::Style LicenceGuard::defaultStyle()
+{
+    return { juce::Colour (0xff0b0b0c), juce::Colour (0xff141416), juce::Colour (0xffededee), juce::Colour (0xff8e8e94),
+             juce::Colour (0xffff8a3d), juce::Colour (0xffff6b5b) };
+}
+
+LicenceGuard::LicenceGuard (juce::Component& e, LicencePanel::Style style) : editor (e), panel (style)
+{
+    editor.addChildComponent (panel); // le panneau s'affiche de lui-même tant qu'il n'y a pas de licence valable
+    editor.addComponentListener (this);
+    layout();
+}
+
+LicenceGuard::~LicenceGuard()
+{
+    cancelPendingUpdate();
+    editor.removeComponentListener (this);
+    editor.removeChildComponent (&panel);
+}
+
+void LicenceGuard::layout()
+{
+    const int w = editor.getWidth(), h = editor.getHeight();
+    if (w <= 0 || h <= 0) return;
+    // La carte fait 500 x 330 : dans une petite fenêtre, tout le panneau est réduit pour rester lisible.
+    const float scale = juce::jmin (1.f, (float) w / 540.f, (float) h / 370.f);
+    panel.setTransform (juce::AffineTransform::scale (scale));
+    panel.setBounds (0, 0, juce::roundToInt ((float) w / scale), juce::roundToInt ((float) h / scale));
+    if (panel.isVisible()) panel.toFront (false);
+}
+
 // ---------------------------------------------------------------- Badge
 
 LicenceBadge::LicenceBadge (juce::Colour t, juce::Colour h, juce::Justification a) : text (t), hover (h), align (a)
