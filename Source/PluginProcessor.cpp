@@ -18,6 +18,17 @@ const std::vector<Preset> presets
     { "Grande Salle",  0, 15,  0,  0, 55 },
 };
 
+// The kit of a new instance: a mix of every tab, low to high, so the pads play something useful right away.
+struct DefaultPad { int category; float where; }; // where: 0 = lowest sound of the tab, 1 = highest
+const DefaultPad defaultKit[padsPerPage]
+{
+    { 0, .1f }, { 0, .5f }, { 0, .9f },  // Djembé grave, médium, aigu
+    { 1, .25f }, { 1, .55f }, { 1, .85f }, // Congas
+    { 2, .2f }, { 2, .8f },               // Talking
+    { 4, .3f }, { 3, .5f }, { 5, .5f }, { 7, .8f }, // Tom, Perc, Rim, Clap
+    { 6, .5f }, { 6, .85f }, { 8, 0 }, { 9, .3f }, // Shakers, Cowbell, FX
+};
+
 juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
 {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
@@ -50,6 +61,7 @@ PercProcessor::PercProcessor()
     favouritesFile = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
                          .getChildFile ("Swell").getChildFile ("The Percussionist").getChildFile ("favoris.txt");
     loadFavourites();
+    resetKit();
     loader = std::thread ([this]
     {
         ownedBank = SampleBank::load (&BinaryData::getNamedResource);
@@ -91,7 +103,21 @@ void PercProcessor::setValue (const juce::String& id, float v)
 void PercProcessor::selectCategory (int c)
 {
     setValue ("instrument", (float) c);
-    currentPage.store (0);
+}
+
+void PercProcessor::resetKit()
+{
+    for (int pad = 0; pad < padsPerPage; ++pad)
+    {
+        const auto& d = defaultKit[pad];
+        setPadSound (pad, d.category, juce::roundToInt (d.where * (float) (soundCount (d.category) - 1)));
+    }
+}
+
+void PercProcessor::setPadSound (int pad, int c, int index)
+{
+    if (pad < 0 || pad >= padsPerPage || c < 0 || c >= categoryCount || index < 0 || index >= soundCount (c)) return;
+    kit[(size_t) pad].store (c * maxSounds + index);
 }
 
 void PercProcessor::loadFavourites()
@@ -130,7 +156,6 @@ void PercProcessor::toggleFavourite (int c, int index)
     auto& f = favourite[(size_t) c][(size_t) index];
     f.store (! f.load());
     saveFavourites();
-    setPage (currentPage.load());
 }
 
 int PercProcessor::favouriteCount (int c) const
@@ -143,7 +168,6 @@ int PercProcessor::favouriteCount (int c) const
 void PercProcessor::setFavouritesOnly (bool on)
 {
     onlyFavourites.store (on);
-    currentPage.store (0);
 }
 
 int PercProcessor::visibleSound (int c, int n) const
@@ -155,10 +179,10 @@ int PercProcessor::visibleSound (int c, int n) const
     return -1;
 }
 
-void PercProcessor::playSound (int index, float velocity)
+void PercProcessor::playSound (int c, int index, float velocity)
 {
     const auto scope = listQueue.write (1);
-    if (scope.blockSize1 > 0) listPlays[(size_t) scope.startIndex1] = { index, velocity };
+    if (scope.blockSize1 > 0) listPlays[(size_t) scope.startIndex1] = { c * maxSounds + index, velocity };
 }
 
 void PercProcessor::play (const SampleBank& sounds, int c, int index, float velocity, int offset)
@@ -166,7 +190,7 @@ void PercProcessor::play (const SampleBank& sounds, int c, int index, float velo
     const auto& list = sounds.sounds[(size_t) c];
     if (index < 0 || index >= (int) list.size()) return;
     engine.trigger (list[(size_t) index], { value ("tune"), value ("decay") }, velocity, offset);
-    lastPlayed.store (index);
+    lastPlayed.store (c * maxSounds + index);
 }
 
 void PercProcessor::playPad (int pad, float velocity)
@@ -207,31 +231,29 @@ void PercProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
             if (auto bpm = position->getBpm())
                 tempo = juce::jlimit (40.0, 240.0, *bpm);
 
-    const int cat = category();
-    if (cat != playingCategory)
-    {
-        engine.stopAll();
-        playingCategory = cat;
-    }
-
     uiMidi.removeNextBlockOfMessages (midi, buffer.getNumSamples());
     if (const auto* sounds = bank.load())
     {
-        const int first = page() * padsPerPage;
         for (const auto m : midi)
         {
             const auto message = m.getMessage();
-            const int pad = message.getNoteNumber() - firstPadNote;
-            if (! message.isNoteOn() || pad < 0 || pad >= padsPerPage)
-                continue;
-            const int index = visibleSound (cat, first + pad);
-            if (index < 0) continue;
-            play (*sounds, cat, index, message.getFloatVelocity(), m.samplePosition);
+            if (! message.isNoteOn()) continue;
+            const int pad = padForNote (message.getNoteNumber());
+            const auto slot = padSound (pad);
+            play (*sounds, slot.category, slot.index, message.getFloatVelocity(), m.samplePosition);
             flash[pad].store (message.getFloatVelocity());
         }
+        auto previews = [&] (int start, int count)
+        {
+            for (int k = 0; k < count; ++k)
+            {
+                const auto [code, velocity] = listPlays[(size_t) (start + k)];
+                play (*sounds, code / maxSounds, code % maxSounds, velocity, 0);
+            }
+        };
         const auto scope = listQueue.read (listQueue.getNumReady());
-        for (int k = 0; k < scope.blockSize1; ++k) play (*sounds, cat, listPlays[(size_t) (scope.startIndex1 + k)].first, listPlays[(size_t) (scope.startIndex1 + k)].second, 0);
-        for (int k = 0; k < scope.blockSize2; ++k) play (*sounds, cat, listPlays[(size_t) (scope.startIndex2 + k)].first, listPlays[(size_t) (scope.startIndex2 + k)].second, 0);
+        previews (scope.startIndex1, scope.blockSize1);
+        previews (scope.startIndex2, scope.blockSize2);
     }
 
     engine.render (buffer);
@@ -262,8 +284,13 @@ void PercProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
     auto tree = state.copyState();
     tree.setProperty ("program", program.load(), nullptr);
-    tree.setProperty ("page", currentPage.load(), nullptr);
     tree.setProperty ("favouritesOnly", favouritesOnly(), nullptr);
+    // The kit, by sound id (stays right if the sounds are renumbered in a later version).
+    for (int pad = 0; pad < padsPerPage; ++pad)
+    {
+        const auto slot = padSound (pad);
+        tree.setProperty ("pad" + juce::String (pad), juce::String (sampleLists[slot.category].entries[slot.index].id), nullptr);
+    }
     if (auto xml = tree.createXml())
         copyXmlToBinary (*xml, dest);
 }
@@ -277,7 +304,15 @@ void PercProcessor::setStateInformation (const void* data, int size)
     program.store (tree.getProperty ("program", 1));
     state.replaceState (tree);
     onlyFavourites.store (tree.getProperty ("favouritesOnly", false));
-    setPage (tree.getProperty ("page", 0));
+    resetKit(); // projects saved before the kit existed keep the default kit
+    for (int pad = 0; pad < padsPerPage; ++pad)
+    {
+        const auto id = tree.getProperty ("pad" + juce::String (pad)).toString();
+        if (id.isEmpty()) continue;
+        for (int c = 0; c < categoryCount; ++c)
+            for (int i = 0; i < soundCount (c); ++i)
+                if (id == sampleLists[c].entries[i].id) { setPadSound (pad, c, i); c = categoryCount; break; }
+    }
 }
 
 juce::AudioProcessorEditor* PercProcessor::createEditor() { return new PercEditor (*this); }

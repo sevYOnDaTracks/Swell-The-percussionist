@@ -30,23 +30,22 @@ private:
 
 class PercView;
 
+// One pad of the kit: click to play it (top = soft, bottom = loud) and select it; a click in the sound list loads into it.
 class Pad : public juce::Component
 {
 public:
-    Pad (PercView&, int slot);
+    Pad (PercView&, int pad);
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
     void setHeat (float h) { if (h != heat) { heat = h; repaint(); } }
     float getHeat() const { return heat; }
-    juce::Rectangle<float> starArea() const { return { (float) getWidth() - 23, 4, 20, 20 }; }
 
-    int sound = -1;          // index in the category, -1: empty pad
-    juce::String name;
-    bool favourite = false;
+    juce::String name, group;
+    bool selected = false;
 
 private:
     PercView& view;
-    int slot;
+    int pad;
     float heat = 0;
 };
 
@@ -66,11 +65,12 @@ private:
     juce::Image photo;
 };
 
-// Every sound of the category (or its favourites) in four columns: click a name to play it, the star to keep it.
+// Every sound of the category (or its favourites) in two columns: click a name to load it into the selected pad,
+// the star to keep it in the favourites.
 class SoundList : public juce::Component, private juce::ListBoxModel
 {
 public:
-    static constexpr int columns = 4;
+    static constexpr int columns = 2;
     SoundList (PercView&, PercProcessor&);
     void resized() override { box.setBounds (getLocalBounds()); }
     void update() { box.updateContent(); box.repaint(); }
@@ -99,25 +99,24 @@ public:
     bool keyPressed (const juce::KeyPress&) override;
 
     void selectCategory (int);
-    void turnPage (int delta);
+    void selectPad (int);
     void play (int pad, float velocity);
-    void playSound (int index);
+    void loadSound (int index);       // into the selected pad, and plays it
     void toggleFavourite (int index);
     void setFavouritesOnly (bool);
-    void setListShown (bool);
     int shownCategory() const { return category; }
-    int shownPage() const { return page; }
-    bool listShown() const { return list.isVisible(); }
+    int selectedPad() const { return selected; }
 
 private:
     void timerCallback() override;
     void refresh();
-    void showSound (int index, int velocity);
+    void showSound (PercProcessor::Slot, int pad, int velocity);
 
     PercProcessor& processor;
     PercLook look;
     std::array<juce::Image, categoryCount> photos;
-    int category = -1, page = -1, lastShown = -1, shownFavourites = -1;
+    int category = -1, selected = 0, shownFavourites = -1;
+    std::array<int, padsPerPage> shownKit {};
     bool ready = false;
     juce::String bigName, subtitle;
 
@@ -125,7 +124,7 @@ private:
     juce::OwnedArray<Tab> tabs;
     juce::OwnedArray<Knob> knobs;
     juce::ComboBox preset;
-    juce::TextButton previous { "<" }, next { ">" }, favouritesButton, listButton;
+    juce::TextButton favouritesButton;
     SoundList list;
     swell::LicenceBadge licenceBadge;
     swell::LicencePanel licencePanel; // last child: covers everything until the plugin is activated

@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <set>
 #include "../Source/PluginEditor.h"
 #include <iostream>
 #include <stdexcept>
@@ -69,7 +70,7 @@ int main()
         juce::ScopedJuceInitialiser_GUI gui;
         swell::Licence::unlockForTesting(); // rendu hors ligne, sans fichier de licence
 
-        // Every embedded sound decodes and plays, under full scale.
+        // Every embedded sound decodes and plays from a pad, under full scale.
         {
             PercProcessor p;
             ready (p);
@@ -77,42 +78,51 @@ int main()
             int total = 0;
             for (int c = 0; c < categoryCount; ++c)
             {
-                p.selectCategory (c);
                 require (PercProcessor::soundCount (c) > 0, "empty category");
-                for (int page = 0; page < p.pageCount (c); ++page)
+                for (int i = 0; i < PercProcessor::soundCount (c); ++i)
                 {
-                    p.setPage (page);
-                    for (int pad = 0; pad < padsPerPage && page * padsPerPage + pad < PercProcessor::soundCount (c); ++pad)
-                    {
-                        const auto r = render (p, .05, firstPadNote + pad);
-                        const auto name = juce::String::fromUTF8 (sampleLists[c].entries[page * padsPerPage + pad].name);
-                        require (r.peak > .001f, juce::String::fromUTF8 (categories[c].label) + " / " + name + " is silent");
-                        require (r.peak <= 1.f, name + " clips");
-                        render (p, .3);
-                        ++total;
-                    }
+                    p.setPadSound (5, c, i);
+                    const auto r = render (p, .05, firstPadNote + 5);
+                    const auto name = juce::String::fromUTF8 (sampleLists[c].entries[i].name);
+                    require (r.peak > .001f, juce::String::fromUTF8 (categories[c].label) + " / " + name + " is silent");
+                    require (r.peak <= 1.f, name + " clips");
+                    render (p, .3);
+                    ++total;
                 }
             }
             std::cout << total << " sounds play\n";
-            int listed = 0;
-            for (int c = 0; c < categoryCount; ++c) listed += PercProcessor::soundCount (c);
-            require (total == listed && total > 0, "sounds missing");
         }
 
-        // Silence without input; notes outside the pads, and pads past the last sound, play nothing.
+        // Silence without input. Every MIDI note plays a pad (C1 = pad 1, the 16 pads repeat over the keyboard),
+        // whatever tab the window shows.
         {
             PercProcessor p;
             ready (p);
             require (render (p, .3).peak == 0, "output without any hit");
-            require (render (p, .3, 80).peak == 0, "unmapped note played");
-            const int c = 0, last = p.pageCount (c) - 1;
-            p.selectCategory (c);
-            p.setPage (last);
-            const int onLastPage = PercProcessor::soundCount (c) - last * padsPerPage;
-            if (onLastPage < padsPerPage)
-                require (render (p, .3, firstPadNote + padsPerPage - 1).peak == 0, "empty pad played");
-            p.setPage (999);
-            require (p.page() == last, "page not limited");
+            require (PercProcessor::padForNote (36) == 0 && PercProcessor::padForNote (51) == 15 && PercProcessor::padForNote (52) == 0
+                     && PercProcessor::padForNote (35) == 15 && PercProcessor::padForNote (60) == 8 && PercProcessor::padForNote (0) == 12, "note to pad");
+            for (int note : { 0, 24, 36, 48, 60, 72, 80, 127 })
+            {
+                render (p, 2);
+                p.takeFlash (PercProcessor::padForNote (note));
+                require (render (p, .3, note).peak > .001f, "note " + juce::String (note) + " is silent");
+                require (p.takeFlash (PercProcessor::padForNote (note)) > 0, "note " + juce::String (note) + " did not light its pad");
+            }
+            const auto before = p.padSound (3);
+            for (int c = 0; c < categoryCount; ++c) p.selectCategory (c);
+            const auto after = p.padSound (3);
+            require (before.category == after.category && before.index == after.index, "changing tab changed the kit");
+            render (p, 2);
+            render (p, .05, firstPadNote + 3);
+            require (p.lastSound().category == before.category && p.lastSound().index == before.index, "pad plays another sound");
+        }
+
+        // The default kit mixes the tabs.
+        {
+            PercProcessor p;
+            std::set<int> used;
+            for (int pad = 0; pad < padsPerPage; ++pad) used.insert (p.padSound (pad).category);
+            require (used.size() == (size_t) categoryCount, "default kit does not use every tab");
         }
 
         // Each effect knob changes the sound once turned up from zero.
@@ -121,7 +131,7 @@ int main()
         for (const char* id : { "sat", "cho", "fla", "dly", "rev" })
         {
             PercProcessor a, b;
-            for (auto* p : { &a, &b }) { ready (*p); p->setCurrentProgram (0); p->selectCategory (category); }
+            for (auto* p : { &a, &b }) { ready (*p); p->setCurrentProgram (0); p->setPadSound (0, category, 0); }
             b.setValue (id, 80);
             render (a, .05);
             render (b, .05);
@@ -136,7 +146,7 @@ int main()
                 PercProcessor p;
                 ready (p);
                 p.setCurrentProgram (0);
-                p.selectCategory (4);
+                p.setPadSound (0, 4, 0);
                 p.setValue ("tune", tune);
                 juce::AudioBuffer<float> b (2, 8192);
                 juce::MidiBuffer m;
@@ -154,26 +164,28 @@ int main()
                 PercProcessor p;
                 ready (p);
                 p.setCurrentProgram (0);
-                p.selectCategory (4);
+                p.setPadSound (0, 4, 0);
                 p.setValue ("decay", decay);
                 return render (p, 2, firstPadNote).energy;
             };
             require (energy (20) < energy (100), "decay does not change the length");
         }
 
-        // Settings survive a save and reload.
+        // Settings and the kit survive a save and reload.
         {
             PercProcessor a, b;
             a.selectCategory (5);
-            a.setPage (3);
+            a.setPadSound (7, 6, 42);
             a.setValue ("rev", 77);
             juce::MemoryBlock saved;
             a.getStateInformation (saved);
             b.setStateInformation (saved.getData(), (int) saved.getSize());
-            require (b.category() == 5 && b.page() == 3 && b.value ("rev") == 77, "state not restored");
+            require (b.category() == 5 && b.value ("rev") == 77, "state not restored");
+            require (b.padSound (7).category == 6 && b.padSound (7).index == 42, "kit not restored");
+            require (b.padSound (0).category == a.padSound (0).category && b.padSound (0).index == a.padSound (0).index, "default pads not restored");
         }
 
-        // Clicks reach the processor: tabs, page buttons, pads and keys.
+        // Clicks reach the processor: tabs, pads, keys, and the list loads into the selected pad.
         {
             PercProcessor p;
             ready (p);
@@ -181,36 +193,38 @@ int main()
             std::vector<Tab*> tabs;
             std::vector<Pad*> pads;
             std::vector<PercView*> views;
-            std::vector<juce::TextButton*> buttons;
+            std::vector<SoundList*> lists;
             collect (*e, tabs);
             collect (*e, pads);
             collect (*e, views);
-            collect (*e, buttons);
-            // Les boutons de l'écran d'activation (licence) ne font pas partie de l'interface du plugin.
-            buttons.erase (std::remove_if (buttons.begin(), buttons.end(), [] (juce::TextButton* b) { return b->findParentComponentOfClass<swell::LicencePanel>() != nullptr; }), buttons.end());
-            require (tabs.size() == categoryCount && pads.size() == padsPerPage && views.size() == 1 && buttons.size() == 4, "missing controls");
-            juce::TextButton* prevButton = nullptr; juce::TextButton* nextButton = nullptr;
-            for (auto* b : buttons) { if (b->getButtonText() == "<") prevButton = b; if (b->getButtonText() == ">") nextButton = b; }
+            collect (*e, lists);
+            require (tabs.size() == categoryCount && pads.size() == padsPerPage && views.size() == 1 && lists.size() == 1, "missing controls");
             for (int i = categoryCount - 1; i >= 0; --i)
             {
                 click (*tabs[(size_t) i], 10, 10);
-                require (p.category() == i && views[0]->shownCategory() == i && p.page() == 0, "tab does not change the category");
+                require (p.category() == i && views[0]->shownCategory() == i, "tab does not change the category");
             }
-            click (*tabs[5], 10, 10);
-            nextButton->onClick();
-            require (p.page() == 1 && views[0]->shownPage() == 1, "next page button");
-            prevButton->onClick();
-            require (p.page() == 0, "previous page button");
             render (p, 1);
-            click (*pads[3], 20, 50);
+            click (*pads[3], 20, (float) pads[3]->getHeight() - 2);
             const auto loud = render (p, .4);
-            require (loud.peak > .05f && p.lastSound() == 3, "pad is silent");
+            require (loud.peak > .05f && views[0]->selectedPad() == 3, "pad is silent or not selected");
+            require (p.lastSound().category == p.padSound (3).category && p.lastSound().index == p.padSound (3).index, "pad plays its sound");
             render (p, 2);
             click (*pads[3], 20, 0);
             require (render (p, .4).energy < loud.energy, "top of the pad is not softer");
             render (p, 2);
+
+            click (*tabs[2], 10, 10);
+            lists[0]->clickCell (2, 1, false); // row 2, column 1 = sound 5
+            require (p.padSound (3).category == 2 && p.padSound (3).index == 5, "list click does not load into the selected pad");
+            require (render (p, .3).peak > .01f, "list click does not play");
+            render (p, 2);
+            render (p, .05, firstPadNote + 3);
+            require (p.lastSound().category == 2 && p.lastSound().index == 5, "MIDI does not play the loaded sound");
+            render (p, 2);
             require (views[0]->keyPressed (juce::KeyPress ('q', {}, 'q')), "key ignored");
-            require (render (p, .4).peak > .05f && p.lastSound() == 8, "key does not play its pad");
+            require (render (p, .4).peak > .05f && views[0]->selectedPad() == 8, "key does not play its pad");
+            require (e->createComponentSnapshot (e->getLocalBounds()).isValid(), "editor did not draw");
         }
 
         // Soft and Clean is the second preset and the default settings.
@@ -224,7 +238,7 @@ int main()
             require (p.value ("sat") == 17 && p.value ("rev") == 2, "Soft and Clean preset values");
         }
 
-        // Favourites: the star keeps a sound, Favoris shows only those, and they are saved for the next session.
+        // Favourites: the star keeps a sound, Favoris shows only those in the list, and they are saved for the next session.
         {
             PercProcessor p;
             ready (p);
@@ -233,13 +247,8 @@ int main()
             p.toggleFavourite (5, 40);
             p.toggleFavourite (5, 7);
             p.setFavouritesOnly (true);
-            require (p.visibleCount (5) == 2 && p.pageCount (5) == 1, "favourites view count");
+            require (p.visibleCount (5) == 2, "favourites view count");
             require (p.visibleSound (5, 0) == 7 && p.visibleSound (5, 1) == 40 && p.visibleSound (5, 2) == -1, "favourites order");
-            render (p, .05, firstPadNote + 1);
-            require (p.lastSound() == 40, "pad 2 of the favourites view plays the second favourite");
-            p.takeFlash (2);
-            render (p, .1, firstPadNote + 2);
-            require (p.takeFlash (2) == 0 && p.lastSound() == 40, "pad past the favourites plays nothing");
 
             PercProcessor q;
             q.setFavouritesFile (testFavourites());
@@ -254,51 +263,6 @@ int main()
             PercProcessor s;
             s.setStateInformation (saved.getData(), (int) saved.getSize());
             require (s.favouritesOnly(), "favourites view not restored");
-        }
-
-        // Editor: star on a pad, Favoris button, list view (play and star from the list).
-        {
-            PercProcessor p;
-            ready (p);
-            std::unique_ptr<juce::AudioProcessorEditor> e (p.createEditor());
-            std::vector<Pad*> pads;
-            std::vector<PercView*> views;
-            std::vector<SoundList*> lists;
-            std::vector<juce::TextButton*> buttons;
-            collect (*e, pads);
-            collect (*e, views);
-            collect (*e, lists);
-            collect (*e, buttons);
-            auto button = [&] (const juce::String& text)
-            {
-                for (auto* b : buttons) if (b->getButtonText().contains (text)) return b;
-                throw std::runtime_error (("no button " + text).toStdString());
-            };
-            views[0]->selectCategory (2);
-            click (*pads[3], (float) pads[3]->getWidth() - 14, 14);
-            require (p.isFavourite (2, 3), "star on a pad");
-            render (p, .3);
-            require (render (p, .1).peak == 0, "the star played the pad");
-            auto* fav = button ("Favoris");
-            fav->setToggleState (true, juce::dontSendNotification);
-            fav->onClick();
-            require (p.favouritesOnly() && pads[0]->sound == 3 && pads[1]->sound < 0, "Favoris button");
-            fav->setToggleState (false, juce::dontSendNotification);
-            fav->onClick();
-            require (! p.favouritesOnly() && pads[1]->sound == 1, "Favoris button off");
-
-            auto* listButton = button ("Liste");
-            listButton->setToggleState (true, juce::dontSendNotification);
-            listButton->onClick();
-            require (views[0]->listShown() && ! pads[0]->isVisible(), "list view");
-            lists[0]->clickCell (2, 1, false);   // row 2, column 1 = sound 9
-            require (render (p, .3).peak > .01f && p.lastSound() == 9, "list click plays");
-            lists[0]->clickCell (2, 1, true);
-            require (p.isFavourite (2, 9), "list star");
-            require (e->createComponentSnapshot (e->getLocalBounds()).isValid(), "list view did not draw");
-            listButton->setToggleState (false, juce::dontSendNotification);
-            listButton->onClick();
-            require (! views[0]->listShown() && pads[0]->isVisible(), "back to pads");
             testFavourites().deleteFile();
         }
 

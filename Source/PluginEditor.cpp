@@ -3,7 +3,7 @@
 
 namespace
 {
-constexpr int heroHeight = 410, margin = 32, padsY = 416, sonY = 568;
+constexpr int heroHeight = 300, margin = 32, tabsY = 248, sectionY = 308, contentY = 330, splitX = 568, knobsY = 588;
 
 const juce::Colour bg { 0xff0b0b0c }, ink { 0xffededee }, soft { 0xffd9d9dc }, muted { 0xff8e8e94 }, faint { 0xff6e6e74 },
                    rule { 0xff1f1f22 }, track { 0xff26262a }, orange { 0xffff8a3d };
@@ -34,6 +34,9 @@ juce::Image loadPhoto (int i)
 }
 
 juce::String soundName (int category, int index) { return text (sampleLists[category].entries[index].name); }
+
+// The note of a pad as Ableton, Logic and Cubase name it (C1 = 36). FL Studio calls the same note C3.
+juce::String noteName (int pad) { return juce::MidiMessage::getMidiNoteName (firstPadNote + pad, true, true, 3); }
 
 void star (juce::Graphics& g, juce::Rectangle<float> area, bool filled, juce::Colour colour)
 {
@@ -140,34 +143,29 @@ void Knob::paint (juce::Graphics& g)
 
 // ---------------------------------------------------------------- Pad, Tab
 
-Pad::Pad (PercView& v, int s) : view (v), slot (s) {}
+Pad::Pad (PercView& v, int p) : view (v), pad (p) {}
 
 void Pad::paint (juce::Graphics& g)
 {
-    const auto r = getLocalBounds().toFloat().reduced (.5f);
-    if (name.isEmpty())
-    {
-        g.setColour (juce::Colour (0xff111113));
-        g.fillRoundedRectangle (r, 5);
-        return;
-    }
+    const auto r = getLocalBounds().toFloat().reduced (1);
     const bool lit = heat > .5f;
     g.setColour (juce::Colour (0xff161618).interpolatedWith (orange, heat));
-    g.fillRoundedRectangle (r, 5);
-    g.setColour (lit ? orange : juce::Colour (0xff242428));
-    g.drawRoundedRectangle (r, 5, 1);
-    label (g, name, { 9, 8, r.getWidth() - 31, 18 }, 11.5f, lit ? bg : ink, juce::Justification::centredLeft, true);
-    star (g, starArea().reduced (3), favourite, lit ? bg : favourite ? orange : juce::Colour (0xff4a4a50));
-    label (g, juce::String::charToString ((juce::juce_wchar) padKeys[slot]).toUpperCase(), { 10, r.getHeight() - 20, 20, 12 }, 9.5f, lit ? bg : faint);
+    g.fillRoundedRectangle (r, 6);
+    g.setColour (selected ? orange : lit ? orange : juce::Colour (0xff26262a));
+    g.drawRoundedRectangle (r, 6, selected ? 2.f : 1.f);
+    const float w = r.getWidth(), h = r.getHeight();
+    label (g, juce::String (pad + 1), { 10, 7, 30, 14 }, 10, lit ? bg : selected ? orange : faint, juce::Justification::centredLeft, true);
+    label (g, noteName (pad), { w - 50, 7, 40, 14 }, 10, lit ? bg : faint, juce::Justification::centredRight);
+    label (g, name, { 10, h / 2 - 12, w - 18, 18 }, 12.5f, lit ? bg : ink, juce::Justification::centredLeft, true);
+    label (g, group, { 10, h / 2 + 6, w - 18, 14 }, 10, lit ? bg : muted);
+    label (g, juce::String::charToString ((juce::juce_wchar) padKeys[pad]).toUpperCase(), { w - 30, h - 20, 20, 14 }, 9.5f,
+           lit ? bg : juce::Colour (0xff4a4a50), juce::Justification::centredRight);
 }
 
 void Pad::mouseDown (const juce::MouseEvent& e)
 {
-    if (sound < 0) return;
-    if (starArea().expanded (4).contains (e.position))
-        view.toggleFavourite (sound);
-    else
-        view.play (slot, juce::jlimit (.25f, 1.f, .25f + .75f * (float) e.y / (float) getHeight()));
+    view.selectPad (pad);
+    view.play (pad, juce::jlimit (.25f, 1.f, .25f + .75f * (float) e.y / (float) getHeight()));
 }
 
 Tab::Tab (PercView& v, int i, juce::Image p) : view (v), index (i), photo (std::move (p)) {}
@@ -215,16 +213,18 @@ void SoundList::paintListBoxItem (int row, juce::Graphics& g, int width, int hei
 {
     const int c = processor.category();
     const float cell = (float) width / columns;
+    const auto inPad = processor.padSound (view.selectedPad());
     for (int col = 0; col < columns; ++col)
     {
         const int index = processor.visibleSound (c, row * columns + col);
         if (index < 0) continue;
         const juce::Rectangle<float> r ((float) col * cell, 1, cell - 6, (float) height - 2);
-        const bool last = index == processor.lastSound();
-        g.setColour (last ? juce::Colour (0xff241c16) : juce::Colour (0xff131315));
+        const bool loaded = inPad.category == c && inPad.index == index;
+        g.setColour (loaded ? juce::Colour (0xff241c16) : juce::Colour (0xff131315));
         g.fillRoundedRectangle (r, 3);
-        star (g, r.withWidth (26).reduced (6), processor.isFavourite (c, index), processor.isFavourite (c, index) ? orange : juce::Colour (0xff4a4a50));
-        label (g, soundName (c, index), r.withTrimmedLeft (28).withTrimmedRight (6), 12, last ? orange : ink);
+        const bool fav = processor.isFavourite (c, index);
+        star (g, r.withWidth (26).reduced (6), fav, fav ? orange : juce::Colour (0xff4a4a50));
+        label (g, soundName (c, index), r.withTrimmedLeft (28).withTrimmedRight (6), 12, loaded ? orange : ink);
     }
 }
 
@@ -240,7 +240,7 @@ void SoundList::clickCell (int row, int column, bool onStar)
     const int index = processor.visibleSound (processor.category(), row * columns + column);
     if (index < 0) return;
     if (onStar) view.toggleFavourite (index);
-    else view.playSound (index);
+    else view.loadSound (index);
     box.repaint();
 }
 
@@ -261,26 +261,13 @@ PercView::PercView (PercProcessor& p)
     for (int i = 0; i < padsPerPage; ++i)
         addAndMakeVisible (pads.add (new Pad (*this, i)));
 
-    for (auto* b : { &previous, &next })
-    {
-        b->setWantsKeyboardFocus (false);
-        addAndMakeVisible (b);
-    }
-    previous.onClick = [this] { turnPage (-1); };
-    next.onClick = [this] { turnPage (1); };
-
     favouritesButton.setButtonText (text ("\xe2\x98\x85 Favoris"));
-    listButton.setButtonText ("Liste");
-    for (auto* b : { &favouritesButton, &listButton })
-    {
-        b->setClickingTogglesState (true);
-        b->setWantsKeyboardFocus (false);
-        addAndMakeVisible (b);
-    }
+    favouritesButton.setClickingTogglesState (true);
+    favouritesButton.setWantsKeyboardFocus (false);
     favouritesButton.setToggleState (p.favouritesOnly(), juce::dontSendNotification);
     favouritesButton.onClick = [this] { setFavouritesOnly (favouritesButton.getToggleState()); };
-    listButton.onClick = [this] { setListShown (listButton.getToggleState()); };
-    addChildComponent (list);
+    addAndMakeVisible (favouritesButton);
+    addAndMakeVisible (list);
 
     for (int i = 0; i < p.getNumPrograms(); ++i)
         preset.addItem (p.getProgramName (i), i + 1);
@@ -295,7 +282,7 @@ PercView::PercView (PercProcessor& p)
     };
     knobs.add (new Knob (p, "tune", "TUNE", signedValue (" dt", 0), true));
     knobs.add (new Knob (p, "decay", "DECAY", [] (float v) { return juce::String (juce::roundToInt (v)) + " %"; }));
-    knobs.add (new Knob (p, "sat", "SATURATION", percent));
+    knobs.add (new Knob (p, "sat", "SATUR.", percent));
     knobs.add (new Knob (p, "cho", "CHORUS", percent));
     knobs.add (new Knob (p, "fla", "FLANGUS", percent));
     knobs.add (new Knob (p, "dly", "DELAY", percent));
@@ -306,6 +293,7 @@ PercView::PercView (PercProcessor& p)
     addChildComponent (licencePanel); // shows itself when there is no valid licence
 
     setSize (width, height);
+    showSound (p.padSound (0), 0, -1);
     refresh();
     startTimerHz (60);
 }
@@ -318,33 +306,33 @@ void PercView::resized()
 
     const float tabWidth = ((float) width - margin * 2 - 6 * (categoryCount - 1)) / categoryCount;
     for (int i = 0; i < categoryCount; ++i)
-        tabs[i]->setBounds (margin + juce::roundToInt ((float) i * (tabWidth + 6)), 352, juce::roundToInt (tabWidth), 44);
+        tabs[i]->setBounds (margin + juce::roundToInt ((float) i * (tabWidth + 6)), tabsY, juce::roundToInt (tabWidth), 44);
 
-    next.setBounds (width - margin - 28, padsY - 4, 28, 22);
-    previous.setBounds (width - margin - 28 - 110, padsY - 4, 28, 22);
-    listButton.setBounds (previous.getX() - 16 - 64, padsY - 4, 64, 22);
-    favouritesButton.setBounds (listButton.getX() - 8 - 86, padsY - 4, 86, 22);
-    list.setBounds (margin, padsY + 26, width - margin * 2, height - 34 - (padsY + 26));
-
-    const int columns = padsPerPage / 2;
-    const float padWidth = ((float) width - margin * 2 - 8 * (columns - 1)) / columns;
+    // Pads: 4 x 4, pad 1 at the bottom left (C1), as on an MPC or a drum rack.
+    const int gap = 8, gridWidth = splitX - margin, gridHeight = height - 34 - contentY;
+    const float padWidth = (float) (gridWidth - gap * 3) / 4, padHeight = (float) (gridHeight - gap * 3) / 4;
     for (int i = 0; i < padsPerPage; ++i)
-        pads[i]->setBounds (margin + juce::roundToInt ((float) (i % columns) * (padWidth + 8)), padsY + 26 + (i / columns) * 60,
-                            juce::roundToInt (padWidth), 54);
+    {
+        const int col = i % 4, row = 3 - i / 4;
+        pads[i]->setBounds (margin + juce::roundToInt ((float) col * (padWidth + gap)), contentY + juce::roundToInt ((float) row * (padHeight + gap)),
+                            juce::roundToInt (padWidth), juce::roundToInt (padHeight));
+    }
 
-    const float slot = (float) (width - margin * 2) / (float) knobs.size();
+    const int right = splitX + 32;
+    favouritesButton.setBounds (width - margin - 86, sectionY - 4, 86, 22);
+    list.setBounds (right, contentY, width - margin - right, knobsY - 14 - contentY);
+
+    const float slot = (float) (width - margin - right) / (float) knobs.size();
     for (int i = 0; i < knobs.size(); ++i)
-        knobs[i]->setBounds (margin + juce::roundToInt (((float) i + .5f) * slot) - 50, sonY + 28, 100, 94);
+        knobs[i]->setBounds (right + juce::roundToInt (((float) i + .5f) * slot) - 35, knobsY + 12, 70, 94);
     licenceBadge.setBounds (width / 2 - 180, height - 17, 360, 14); // milieu : les coins ont déjà la photo et la version
     licencePanel.setBounds (getLocalBounds());
 }
 
-// Brings the tabs, pads and texts in line with the processor (category, page, samples loaded).
+// Brings the tabs, pads and list in line with the processor (category, kit, samples loaded).
 void PercView::refresh()
 {
-    const bool categoryChanged = processor.category() != category;
     category = processor.category();
-    page = processor.page();
     ready = processor.samplesReady();
 
     for (int i = 0; i < categoryCount; ++i)
@@ -353,20 +341,18 @@ void PercView::refresh()
         tabs[i]->repaint();
     }
     shownFavourites = processor.favouriteCount (category);
-    const int first = page * padsPerPage;
     for (int i = 0; i < padsPerPage; ++i)
     {
+        const auto slot = processor.padSound (i);
+        shownKit[(size_t) i] = slot.category * PercProcessor::maxSounds + slot.index;
         auto& pad = *pads[i];
-        pad.sound = processor.visibleSound (category, first + i);
-        pad.name = pad.sound >= 0 ? soundName (category, pad.sound) : juce::String();
-        pad.favourite = pad.sound >= 0 && processor.isFavourite (category, pad.sound);
+        pad.name = soundName (slot.category, slot.index);
+        pad.group = text (categories[slot.category].label);
+        pad.selected = i == selected;
         pad.repaint();
     }
-    previous.setEnabled (page > 0);
-    next.setEnabled (page < processor.pageCount (category) - 1);
     favouritesButton.setToggleState (processor.favouritesOnly(), juce::dontSendNotification);
     list.update();
-    if (categoryChanged || lastShown < 0) showSound (juce::jmax (0, pads[0]->sound), -1);
     repaint();
 }
 
@@ -376,18 +362,21 @@ void PercView::selectCategory (int c)
     refresh();
 }
 
-void PercView::turnPage (int delta)
+void PercView::selectPad (int pad)
 {
-    processor.setPage (page + delta);
+    if (pad == selected) return;
+    selected = pad;
     refresh();
 }
 
 void PercView::play (int pad, float velocity) { processor.playPad (pad, velocity); }
 
-void PercView::playSound (int index)
+void PercView::loadSound (int index)
 {
-    processor.playSound (index, .85f);
-    showSound (index, -1);
+    processor.setPadSound (selected, category, index);
+    processor.playSound (category, index, .85f);
+    showSound ({ category, index }, selected, -1);
+    refresh();
 }
 
 void PercView::toggleFavourite (int index)
@@ -402,29 +391,23 @@ void PercView::setFavouritesOnly (bool on)
     refresh();
 }
 
-void PercView::setListShown (bool on)
+void PercView::showSound (PercProcessor::Slot s, int pad, int velocity)
 {
-    listButton.setToggleState (on, juce::dontSendNotification);
-    list.setVisible (on);
-    for (auto* p : pads) p->setVisible (! on);
-    for (auto* k : knobs) k->setVisible (! on);
-    previous.setVisible (! on);
-    next.setVisible (! on);
-    refresh();
-}
-
-void PercView::showSound (int index, int velocity)
-{
-    lastShown = index;
-    bigName = soundName (category, index);
-    subtitle = text (categories[category].label) + "  " + juce::String (index + 1) + " / " + juce::String (PercProcessor::soundCount (category));
+    bigName = soundName (s.category, s.index);
+    subtitle = "Pad " + juce::String (pad + 1) + text ("  \xc2\xb7  ") + noteName (pad) + text ("  \xc2\xb7  ") + text (categories[s.category].label);
     if (velocity >= 0) subtitle << text ("  \xc2\xb7  ") << velocity;
-    repaint (margin, 90, 460, 140);
+    repaint (margin, 80, 520, 150);
 }
 
 void PercView::timerCallback()
 {
-    if (processor.category() != category || processor.page() != page || processor.samplesReady() != ready
+    bool kitChanged = false;
+    for (int i = 0; i < padsPerPage; ++i)
+    {
+        const auto slot = processor.padSound (i);
+        kitChanged |= shownKit[(size_t) i] != slot.category * PercProcessor::maxSounds + slot.index;
+    }
+    if (kitChanged || processor.category() != category || processor.samplesReady() != ready
         || processor.favouriteCount (processor.category()) != shownFavourites || processor.favouritesOnly() != favouritesButton.getToggleState())
         refresh();
 
@@ -434,17 +417,16 @@ void PercView::timerCallback()
     for (int i = 0; i < padsPerPage; ++i)
     {
         const float hit = processor.takeFlash (i);
-        if (hit > 0) { showSound (processor.lastSound(), juce::roundToInt (hit * 127)); list.update(); }
+        if (hit > 0) showSound (processor.padSound (i), i, juce::roundToInt (hit * 127));
         pads[i]->setHeat (hit > 0 ? 1.f : (pads[i]->getHeat() < .02f ? 0.f : pads[i]->getHeat() * .8f));
     }
 }
 
 bool PercView::keyPressed (const juce::KeyPress& key)
 {
-    if (key == juce::KeyPress::leftKey) { turnPage (-1); return true; }
-    if (key == juce::KeyPress::rightKey) { turnPage (1); return true; }
     const int i = juce::String (padKeys).indexOfChar (juce::CharacterFunctions::toLowerCase (key.getTextCharacter()));
-    if (i < 0 || pads[i]->sound < 0) return false;
+    if (i < 0) return false;
+    selectPad (i);
     play (i, .85f);
     return true;
 }
@@ -456,7 +438,7 @@ void PercView::paint (juce::Graphics& g)
     if (category < 0) return;
     const auto& cat = categories[category];
 
-    // Photo
+    // Photo of the tab shown in the list
     {
         juce::Graphics::ScopedSaveState save (g);
         g.reduceClipRegion (0, 0, width, heroHeight);
@@ -493,34 +475,31 @@ void PercView::paint (juce::Graphics& g)
     label (g, "THE PERCUSSIONIST", { (float) margin + 118, 22, 240, 30 }, 11, ink, juce::Justification::centredLeft, true, .3f);
 
     // Last sound played
-    label (g, upper (text (cat.label)), { (float) margin, 104, 300, 12 }, 9, faint, juce::Justification::centredLeft, false, .2f);
-    label (g, bigName, { (float) margin - 2, 124, 460, 76 }, 46, juce::Colours::white);
-    label (g, ready ? subtitle : text ("Chargement des sons\xe2\x80\xa6"), { (float) margin, 204, 380, 20 }, 14, ready ? soft : orange);
+    label (g, ready ? subtitle : text ("Chargement des sons\xe2\x80\xa6"), { (float) margin, 92, 500, 16 }, 12, ready ? muted : orange);
+    label (g, bigName, { (float) margin - 2, 112, 520, 70 }, 44, juce::Colours::white);
+    label (g, text ("Le piano roll joue les pads : C1 \xc3\xa0 D#2 (C3 \xc3\xa0 D#4 dans FL Studio), et toutes les autres notes."),
+           { (float) margin, 186, 560, 18 }, 11.5f, faint);
 
     // Sections
-    auto section = [&] (const juce::String& name, int y, float ruleEnd)
+    auto section = [&] (const juce::String& name, float x, float ruleEnd)
     {
-        label (g, name, { (float) margin, (float) y, 90, 14 }, 9, faint, juce::Justification::centredLeft, false, .2f);
+        label (g, name, { x, (float) sectionY, ruleEnd - x, 14 }, 9, faint, juce::Justification::centredLeft, false, .2f);
+        const float textEnd = x + juce::GlyphArrangement::getStringWidth (juce::FontOptions (9.f).withKerningFactor (.2f), name) + 12;
         g.setColour (rule);
-        g.fillRect ((float) margin + 60, (float) y + 7, ruleEnd - margin - 60, 1.f);
+        g.fillRect (textEnd, (float) sectionY + 7, ruleEnd - textEnd, 1.f);
     };
-    section ("SONS", padsY, (float) favouritesButton.getX() - 14);
-    if (! listShown())
-    {
-        label (g, "Page " + juce::String (page + 1) + " / " + juce::String (processor.pageCount (category)),
-               { (float) previous.getRight(), (float) padsY - 4, (float) (next.getX() - previous.getRight()), 22 }, 12, soft, juce::Justification::centred);
-        section ("SON", sonY, W - margin);
-    }
-    else
-    {
-        label (g, juce::String (processor.visibleCount (category)) + " sons", { (float) previous.getX(), (float) padsY - 4, 138, 22 }, 12, soft, juce::Justification::centred);
-    }
+    section (text ("KIT  \xc2\xb7  PAD ") + juce::String (selected + 1) + " " + text ("S\xc3\x89LECTIONN\xc3\x89"), (float) margin, (float) splitX);
+    const int right = splitX + 32;
+    section (text ("SONS  \xc2\xb7  ") + upper (text (cat.label)) + text ("  \xc2\xb7  ") + text ("CLIQUE POUR CHARGER DANS LE PAD ") + juce::String (selected + 1),
+             (float) right, (float) favouritesButton.getX() - 12);
     if (processor.favouritesOnly() && processor.favouriteCount (category) == 0)
-        label (g, text ("Aucun favori dans cet onglet : touche l'\xc3\xa9toile d'un son pour l'ajouter, ou d\xc3\xa9sactive \xe2\x98\x85 Favoris."),
-               { (float) margin, (float) padsY + 40, W - margin * 2, 40 }, 13, muted, juce::Justification::centred);
+        label (g, text ("Aucun favori dans cet onglet : touche l'\xc3\xa9toile d'un son, ou d\xc3\xa9sactive \xe2\x98\x85 Favoris."),
+               { (float) right, (float) contentY + 10, W - margin - right, 40 }, 12.5f, muted, juce::Justification::centred);
+    g.setColour (rule);
+    g.fillRect ((float) right, (float) knobsY, W - margin - right, 1.f);
 
-    label (g, text ("Photo provisoire : ") + text (cat.credit), { (float) margin, (float) height - 26, 500, 14 }, 10, faint);
-    label (g, "Swell-audio / 0.3 / by @sevyondatracks", { W - margin - 300, (float) height - 26, 300, 14 }, 10, faint, juce::Justification::centredRight);
+    label (g, text ("Photo provisoire : ") + text (cat.credit), { (float) margin, (float) height - 20, 400, 14 }, 10, faint);
+    label (g, "Swell-audio / 0.4 / by @sevyondatracks", { W - margin - 300, (float) height - 20, 300, 14 }, 10, faint, juce::Justification::centredRight);
 }
 
 // ---------------------------------------------------------------- Editor
