@@ -151,8 +151,8 @@ void Pad::paint (juce::Graphics& g)
     const bool lit = heat > .5f;
     g.setColour (juce::Colour (0xff161618).interpolatedWith (orange, heat));
     g.fillRoundedRectangle (r, 6);
-    g.setColour (selected ? orange : lit ? orange : juce::Colour (0xff26262a));
-    g.drawRoundedRectangle (r, 6, selected ? 2.f : 1.f);
+    g.setColour (selected || lit || dropHover ? orange : juce::Colour (0xff26262a));
+    g.drawRoundedRectangle (r, 6, dropHover ? 3.f : selected ? 2.f : 1.f);
     const float w = r.getWidth(), h = r.getHeight();
     label (g, juce::String (pad + 1), { 10, 7, 30, 14 }, 10, lit ? bg : selected ? orange : faint, juce::Justification::centredLeft, true);
     label (g, padNote (pad), { w - 50, 7, 40, 14 }, 10, lit ? bg : faint, juce::Justification::centredRight);
@@ -166,6 +166,15 @@ void Pad::mouseDown (const juce::MouseEvent& e)
 {
     view.selectPad (pad);
     view.play (pad, juce::jlimit (.25f, 1.f, .25f + .75f * (float) e.y / (float) getHeight()));
+}
+
+bool Pad::isInterestedInDragSource (const SourceDetails& d) { return d.description.toString().startsWith ("sound:"); }
+
+void Pad::itemDropped (const SourceDetails& d)
+{
+    dropHover = false;
+    const int code = d.description.toString().fromFirstOccurrenceOf ("sound:", false, false).getIntValue();
+    view.loadSoundInto (pad, code / PercProcessor::maxSounds, code % PercProcessor::maxSounds);
 }
 
 Tab::Tab (PercView& v, int i, juce::Image p) : view (v), index (i), photo (std::move (p)) {}
@@ -228,11 +237,21 @@ void SoundList::paintListBoxItem (int row, juce::Graphics& g, int width, int hei
     }
 }
 
+int SoundList::columnAt (float x) const
+{
+    return juce::jlimit (0, columns - 1, (int) (x / ((float) box.getVisibleRowWidth() / columns)));
+}
+
 void SoundList::listBoxItemClicked (int row, const juce::MouseEvent& e)
 {
-    const float cell = (float) box.getVisibleRowWidth() / columns;
-    const int col = juce::jlimit (0, columns - 1, (int) ((float) e.x / cell));
-    clickCell (row, col, (float) e.x - (float) col * cell < 28);
+    const int col = columnAt ((float) e.x);
+    clickCell (row, col, (float) e.x - (float) col * ((float) box.getVisibleRowWidth() / columns) < 28);
+}
+
+void SoundList::listBoxItemDoubleClicked (int row, const juce::MouseEvent& e)
+{
+    const int col = columnAt ((float) e.x);
+    if ((float) e.x - (float) col * ((float) box.getVisibleRowWidth() / columns) >= 28) loadCell (row, col);
 }
 
 void SoundList::clickCell (int row, int column, bool onStar)
@@ -240,8 +259,26 @@ void SoundList::clickCell (int row, int column, bool onStar)
     const int index = processor.visibleSound (processor.category(), row * columns + column);
     if (index < 0) return;
     if (onStar) view.toggleFavourite (index);
-    else view.loadSound (index);
+    else if (juce::Time::getMillisecondCounterHiRes() - lastLoad > 400) view.previewSound (index);
     box.repaint();
+}
+
+void SoundList::loadCell (int row, int column)
+{
+    const int index = processor.visibleSound (processor.category(), row * columns + column);
+    if (index < 0) return;
+    lastLoad = juce::Time::getMillisecondCounterHiRes();
+    view.loadSound (index);
+    box.repaint();
+}
+
+juce::var SoundList::getDragSourceDescription (const juce::SparseSet<int>& rows)
+{
+    if (rows.isEmpty()) return {};
+    // The column where the drag started.
+    const auto down = box.getLocalPoint (nullptr, juce::Desktop::getInstance().getMainMouseSource().getLastMouseDownPosition());
+    const int index = processor.visibleSound (processor.category(), rows[0] * columns + columnAt (down.x));
+    return index < 0 ? juce::var() : dragDescription (processor.category(), index);
 }
 
 // ---------------------------------------------------------------- Window
@@ -374,11 +411,25 @@ void PercView::selectPad (int pad)
 
 void PercView::play (int pad, float velocity) { processor.playPad (pad, velocity); }
 
-void PercView::loadSound (int index)
+void PercView::previewSound (int index)
 {
-    processor.setPadSound (selected, category, index);
     processor.playSound (category, index, .85f);
-    showSound ({ category, index }, selected, -1, -1);
+    bigName = soundName (category, index);
+    subtitle = text ("\xc3\x89""coute  \xc2\xb7  ") + text (categories[category].label)
+             + text ("  \xc2\xb7  double-clic ou glisse-le sur un pad pour le charger");
+    repaint (margin, 80, 560, 150);
+}
+
+void PercView::loadSound (int index) { loadSoundInto (selected, category, index); }
+
+void PercView::loadSoundInto (int pad, int c, int index)
+{
+    if (pad < 0 || pad >= padsPerPage || c < 0 || c >= categoryCount || index < 0 || index >= PercProcessor::soundCount (c)) return;
+    selected = pad;
+    processor.setPadSound (pad, c, index);
+    processor.playSound (c, index, .85f);
+    showSound ({ c, index }, pad, -1, -1);
+    subtitle = text ("Charg\xc3\xa9 dans le ") + subtitle;
     refresh();
 }
 
@@ -490,6 +541,8 @@ void PercView::paint (juce::Graphics& g)
     label (g, text ("Le piano roll joue les pads 1 \xc3\xa0 16 de ") + padNote (0) + text (" \xc3\xa0 ") + padNote (padsPerPage - 1)
                + text (", puis les 16 pads se r\xc3\xa9p\xc3\xa8tent sur tout le clavier."),
            { (float) margin, 186, 560, 18 }, 11.5f, faint);
+    label (g, text ("Clic sur un son : tu l'\xc3\xa9""coutes, le kit ne change pas. Double-clic ou glisser sur un pad : il y est charg\xc3\xa9."),
+           { (float) margin, 204, 560, 18 }, 11.5f, faint);
 
     // Sections
     auto section = [&] (const juce::String& name, float x, float ruleEnd)
@@ -501,7 +554,7 @@ void PercView::paint (juce::Graphics& g)
     };
     section (text ("KIT  \xc2\xb7  PAD ") + juce::String (selected + 1) + " " + text ("S\xc3\x89LECTIONN\xc3\x89"), (float) margin, (float) splitX);
     const int right = splitX + 32;
-    section (text ("SONS  \xc2\xb7  ") + upper (text (cat.label)) + text ("  \xc2\xb7  ") + text ("CLIQUE POUR CHARGER DANS LE PAD ") + juce::String (selected + 1),
+    section (text ("SONS  \xc2\xb7  ") + upper (text (cat.label)) + text ("  \xc2\xb7  CLIC : \xc3\x89""COUTER  \xc2\xb7  DOUBLE-CLIC : DANS LE PAD ") + juce::String (selected + 1),
              (float) right, (float) favouritesButton.getX() - 12);
     if (processor.favouritesOnly() && processor.favouriteCount (category) == 0)
         label (g, text ("Aucun favori dans cet onglet : touche l'\xc3\xa9toile d'un son, ou d\xc3\xa9sactive \xe2\x98\x85 Favoris."),

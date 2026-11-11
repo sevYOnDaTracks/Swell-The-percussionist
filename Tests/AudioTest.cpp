@@ -198,7 +198,7 @@ int main()
             require (b.padSound (0).category == a.padSound (0).category && b.padSound (0).index == a.padSound (0).index, "default pads not restored");
         }
 
-        // Clicks reach the processor: tabs, pads, keys, and the list loads into the selected pad.
+        // Clicks reach the processor: tabs, pads, keys; the list plays, and loads only on purpose.
         {
             PercProcessor p;
             ready (p);
@@ -227,11 +227,27 @@ int main()
             require (render (p, .4).energy < loud.energy, "top of the pad is not softer");
             render (p, 2);
 
+            // Browsing the list plays the sounds but never changes the kit (so never what the piano roll plays).
             click (*tabs[2], 10, 10);
-            lists[0]->clickCell (2, 1, false); // row 2, column 1 = sound 5
-            require (p.padSound (3).category == 2 && p.padSound (3).index == 5, "list click does not load into the selected pad");
+            const auto kitBefore = p.padSound (3);
+            for (int col = 0; col < 2; ++col) lists[0]->clickCell (4, col, false);
             require (render (p, .3).peak > .01f, "list click does not play");
+            require (p.padSound (3).category == kitBefore.category && p.padSound (3).index == kitBefore.index, "list click changed the kit");
             render (p, 2);
+            lists[0]->loadCell (2, 1); // row 2, column 1 = sound 5
+            require (p.padSound (3).category == 2 && p.padSound (3).index == 5, "double-click does not load into the selected pad");
+            require (render (p, .3).peak > .01f, "loading does not play");
+            render (p, 2);
+            // Dropping a sound onto a pad loads it there, and selects that pad.
+            {
+                juce::DragAndDropTarget::SourceDetails drop (SoundList::dragDescription (7, 2), lists[0], {});
+                require (pads[10]->isInterestedInDragSource (drop), "pad refuses a sound");
+                pads[10]->itemDropped (drop);
+                require (p.padSound (10).category == 7 && p.padSound (10).index == 2 && views[0]->selectedPad() == 10, "drop does not load into the pad");
+                require (p.padSound (3).category == 2 && p.padSound (3).index == 5, "drop changed another pad");
+                views[0]->selectPad (3);
+                render (p, 2);
+            }
             render (p, .05, firstPadNote + 3);
             require (p.lastSound().category == 2 && p.lastSound().index == 5, "MIDI does not play the loaded sound");
             render (p, 2);

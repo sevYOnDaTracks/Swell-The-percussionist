@@ -30,13 +30,18 @@ private:
 
 class PercView;
 
-// One pad of the kit: click to play it (top = soft, bottom = loud) and select it; a click in the sound list loads into it.
-class Pad : public juce::Component
+// One pad of the kit: click to play it (top = soft, bottom = loud) and select it. A sound dragged from the list onto it,
+// or double-clicked in the list while it is selected, is loaded into it.
+class Pad : public juce::Component, public juce::DragAndDropTarget
 {
 public:
     Pad (PercView&, int pad);
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
+    bool isInterestedInDragSource (const SourceDetails&) override;
+    void itemDragEnter (const SourceDetails&) override { dropHover = true; repaint(); }
+    void itemDragExit (const SourceDetails&) override { dropHover = false; repaint(); }
+    void itemDropped (const SourceDetails&) override;
     void setHeat (float h) { if (h != heat) { heat = h; repaint(); } }
     float getHeat() const { return heat; }
 
@@ -47,6 +52,7 @@ private:
     PercView& view;
     int pad;
     float heat = 0;
+    bool dropHover = false;
 };
 
 class Tab : public juce::Component
@@ -65,8 +71,9 @@ private:
     juce::Image photo;
 };
 
-// Every sound of the category (or its favourites) in two columns: click a name to load it into the selected pad,
-// the star to keep it in the favourites.
+// Every sound of the category (or its favourites) in two columns. A click only plays the sound (browsing never changes
+// what the piano roll plays); a double-click loads it into the selected pad, and it can be dragged onto any pad.
+// The star keeps it in the favourites.
 class SoundList : public juce::Component, private juce::ListBoxModel
 {
 public:
@@ -74,20 +81,27 @@ public:
     SoundList (PercView&, PercProcessor&);
     void resized() override { box.setBounds (getLocalBounds()); }
     void update() { box.updateContent(); box.repaint(); }
-    void clickCell (int row, int column, bool onStar); // also used by the tests
+    // Also used by the tests.
+    void clickCell (int row, int column, bool onStar); // plays the sound, or toggles its star
+    void loadCell (int row, int column);               // into the selected pad
+    static juce::var dragDescription (int category, int index) { return "sound:" + juce::String (category * PercProcessor::maxSounds + index); }
 
 private:
     int getNumRows() override;
     void paintListBoxItem (int row, juce::Graphics&, int width, int height, bool selected) override;
     void listBoxItemClicked (int row, const juce::MouseEvent&) override;
+    void listBoxItemDoubleClicked (int row, const juce::MouseEvent&) override;
+    juce::var getDragSourceDescription (const juce::SparseSet<int>&) override;
+    int columnAt (float x) const;
 
     PercView& view;
     PercProcessor& processor;
     juce::ListBox box;
+    double lastLoad = 0; // the click that ends a double-click must not play the sound once more
 };
 
 // The whole window, drawn at a fixed size and scaled by the editor.
-class PercView : public juce::Component, private juce::Timer
+class PercView : public juce::Component, public juce::DragAndDropContainer, private juce::Timer
 {
 public:
     static constexpr int width = 1180, height = 730;
@@ -101,7 +115,9 @@ public:
     void selectCategory (int);
     void selectPad (int);
     void play (int pad, float velocity);
+    void previewSound (int index);    // plays a sound of the list, without touching the kit
     void loadSound (int index);       // into the selected pad, and plays it
+    void loadSoundInto (int pad, int category, int index);
     void toggleFavourite (int index);
     void setFavouritesOnly (bool);
     int shownCategory() const { return category; }
