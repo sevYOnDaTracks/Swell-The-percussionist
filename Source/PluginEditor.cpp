@@ -35,8 +35,8 @@ juce::Image loadPhoto (int i)
 
 juce::String soundName (int category, int index) { return text (sampleLists[category].entries[index].name); }
 
-// The note of a pad as Ableton, Logic and Cubase name it (C1 = 36). FL Studio calls the same note C3.
-juce::String noteName (int pad) { return juce::MidiMessage::getMidiNoteName (firstPadNote + pad, true, true, 3); }
+// The note of a pad, named as the host's piano roll names it (C1 in Ableton or Logic, C2 in Reaper, C3 in FL Studio).
+juce::String padNote (int pad) { return PercProcessor::noteName (firstPadNote + pad); }
 
 void star (juce::Graphics& g, juce::Rectangle<float> area, bool filled, juce::Colour colour)
 {
@@ -155,7 +155,7 @@ void Pad::paint (juce::Graphics& g)
     g.drawRoundedRectangle (r, 6, selected ? 2.f : 1.f);
     const float w = r.getWidth(), h = r.getHeight();
     label (g, juce::String (pad + 1), { 10, 7, 30, 14 }, 10, lit ? bg : selected ? orange : faint, juce::Justification::centredLeft, true);
-    label (g, noteName (pad), { w - 50, 7, 40, 14 }, 10, lit ? bg : faint, juce::Justification::centredRight);
+    label (g, padNote (pad), { w - 50, 7, 40, 14 }, 10, lit ? bg : faint, juce::Justification::centredRight);
     label (g, name, { 10, h / 2 - 12, w - 18, 18 }, 12.5f, lit ? bg : ink, juce::Justification::centredLeft, true);
     label (g, group, { 10, h / 2 + 6, w - 18, 14 }, 10, lit ? bg : muted);
     label (g, juce::String::charToString ((juce::juce_wchar) padKeys[pad]).toUpperCase(), { w - 30, h - 20, 20, 14 }, 9.5f,
@@ -293,7 +293,10 @@ PercView::PercView (PercProcessor& p)
     addChildComponent (licencePanel); // shows itself when there is no valid licence
 
     setSize (width, height);
-    showSound (p.padSound (0), 0, -1);
+    // Notes played while the window was closed are not news: no stale name, no pad lit on opening.
+    shownHits = p.lastHit().count;
+    for (int i = 0; i < padsPerPage; ++i) p.takeFlash (i);
+    showSound (p.padSound (0), 0, -1, -1);
     refresh();
     startTimerHz (60);
 }
@@ -308,7 +311,7 @@ void PercView::resized()
     for (int i = 0; i < categoryCount; ++i)
         tabs[i]->setBounds (margin + juce::roundToInt ((float) i * (tabWidth + 6)), tabsY, juce::roundToInt (tabWidth), 44);
 
-    // Pads: 4 x 4, pad 1 at the bottom left (C1), as on an MPC or a drum rack.
+    // Pads: 4 x 4, pad 1 at the bottom left (note 36), as on an MPC or a drum rack.
     const int gap = 8, gridWidth = splitX - margin, gridHeight = height - 34 - contentY;
     const float padWidth = (float) (gridWidth - gap * 3) / 4, padHeight = (float) (gridHeight - gap * 3) / 4;
     for (int i = 0; i < padsPerPage; ++i)
@@ -375,7 +378,7 @@ void PercView::loadSound (int index)
 {
     processor.setPadSound (selected, category, index);
     processor.playSound (category, index, .85f);
-    showSound ({ category, index }, selected, -1);
+    showSound ({ category, index }, selected, -1, -1);
     refresh();
 }
 
@@ -391,10 +394,12 @@ void PercView::setFavouritesOnly (bool on)
     refresh();
 }
 
-void PercView::showSound (PercProcessor::Slot s, int pad, int velocity)
+void PercView::showSound (PercProcessor::Slot s, int pad, int note, int velocity)
 {
     bigName = soundName (s.category, s.index);
-    subtitle = "Pad " + juce::String (pad + 1) + text ("  \xc2\xb7  ") + noteName (pad) + text ("  \xc2\xb7  ") + text (categories[s.category].label);
+    // The note actually played (it can be far from the pad's own note: the 16 pads repeat over the keyboard).
+    subtitle = "Pad " + juce::String (pad + 1) + text ("  \xc2\xb7  ") + PercProcessor::noteName (note >= 0 ? note : firstPadNote + pad)
+             + text ("  \xc2\xb7  ") + text (categories[s.category].label);
     if (velocity >= 0) subtitle << text ("  \xc2\xb7  ") << velocity;
     repaint (margin, 80, 520, 150);
 }
@@ -414,10 +419,15 @@ void PercView::timerCallback()
     if (preset.getSelectedId() != processor.getCurrentProgram() + 1)
         preset.setSelectedId (processor.getCurrentProgram() + 1, juce::dontSendNotification);
 
+    // The name shows the latest note in time (several pads can be hit between two frames).
+    if (const auto hit = processor.lastHit(); hit.count != shownHits)
+    {
+        shownHits = hit.count;
+        showSound (processor.padSound (hit.pad), hit.pad, hit.note, hit.velocity);
+    }
     for (int i = 0; i < padsPerPage; ++i)
     {
         const float hit = processor.takeFlash (i);
-        if (hit > 0) showSound (processor.padSound (i), i, juce::roundToInt (hit * 127));
         pads[i]->setHeat (hit > 0 ? 1.f : (pads[i]->getHeat() < .02f ? 0.f : pads[i]->getHeat() * .8f));
     }
 }
@@ -477,7 +487,8 @@ void PercView::paint (juce::Graphics& g)
     // Last sound played
     label (g, ready ? subtitle : text ("Chargement des sons\xe2\x80\xa6"), { (float) margin, 92, 500, 16 }, 12, ready ? muted : orange);
     label (g, bigName, { (float) margin - 2, 112, 520, 70 }, 44, juce::Colours::white);
-    label (g, text ("Le piano roll joue les pads : C1 \xc3\xa0 D#2 (C3 \xc3\xa0 D#4 dans FL Studio), et toutes les autres notes."),
+    label (g, text ("Le piano roll joue les pads 1 \xc3\xa0 16 de ") + padNote (0) + text (" \xc3\xa0 ") + padNote (padsPerPage - 1)
+               + text (", puis les 16 pads se r\xc3\xa9p\xc3\xa8tent sur tout le clavier."),
            { (float) margin, 186, 560, 18 }, 11.5f, faint);
 
     // Sections
@@ -499,7 +510,7 @@ void PercView::paint (juce::Graphics& g)
     g.fillRect ((float) right, (float) knobsY, W - margin - right, 1.f);
 
     label (g, text ("Photo provisoire : ") + text (cat.credit), { (float) margin, (float) height - 20, 400, 14 }, 10, faint);
-    label (g, "Swell-audio / 0.4 / by @sevyondatracks", { W - margin - 300, (float) height - 20, 300, 14 }, 10, faint, juce::Justification::centredRight);
+    label (g, "Swell-audio / " SWELL_VERSION " / by @sevyondatracks", { W - margin - 300, (float) height - 20, 300, 14 }, 10, faint, juce::Justification::centredRight);
 }
 
 // ---------------------------------------------------------------- Editor

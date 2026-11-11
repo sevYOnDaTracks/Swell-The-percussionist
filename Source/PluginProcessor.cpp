@@ -60,6 +60,8 @@ PercProcessor::PercProcessor()
 {
     favouritesFile = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
                          .getChildFile ("Swell").getChildFile ("The Percussionist").getChildFile ("favoris.txt");
+    auto find = [this] (const char* id) { return state.getRawParameterValue (id); };
+    raw = { find ("tune"), find ("decay"), find ("sat"), find ("cho"), find ("fla"), find ("dly"), find ("rev"), find ("vol") };
     loadFavourites();
     resetKit();
     loader = std::thread ([this]
@@ -92,6 +94,18 @@ void PercProcessor::prepareToPlay (double rate, int block)
     engine.prepare (rate);
     fx.prepare (rate, block);
     uiMidi.reset (rate);
+}
+
+int PercProcessor::middleCOctave()
+{
+    static const int octave = []
+    {
+        const juce::PluginHostType host;
+        if (host.isFruityLoops()) return 5;
+        if (host.isReaper()) return 4;
+        return 3;
+    }();
+    return octave;
 }
 
 void PercProcessor::setValue (const juce::String& id, float v)
@@ -189,7 +203,7 @@ void PercProcessor::play (const SampleBank& sounds, int c, int index, float velo
 {
     const auto& list = sounds.sounds[(size_t) c];
     if (index < 0 || index >= (int) list.size()) return;
-    engine.trigger (list[(size_t) index], { value ("tune"), value ("decay") }, velocity, offset);
+    engine.trigger (list[(size_t) index], { raw.tune->load(), raw.decay->load() }, velocity, offset);
     lastPlayed.store (c * maxSounds + index);
 }
 
@@ -203,15 +217,16 @@ void PercProcessor::playPad (int pad, float velocity)
 FxChain::Settings PercProcessor::fxSettings() const
 {
     FxChain::Settings s;
-    s.drive = value ("sat");
-    s.saturation = juce::jmin (1.f, value ("sat") / 100 * 1.5f);
-    s.chorus = value ("cho") / 100;
-    s.flangus = value ("fla") / 100;
-    s.delay = value ("dly") / 100;
+    const float sat = raw.sat->load(), rev = raw.rev->load();
+    s.drive = sat;
+    s.saturation = juce::jmin (1.f, sat / 100 * 1.5f);
+    s.chorus = raw.cho->load() / 100;
+    s.flangus = raw.fla->load() / 100;
+    s.delay = raw.dly->load() / 100;
     s.delaySeconds = (float) (.75 * 60 / tempo); // dotted eighth, on the host tempo
-    s.reverb = value ("rev") / 100;
-    s.reverbSize = .25f + value ("rev") / 100 * .6f;
-    s.gainDb = value ("vol");
+    s.reverb = rev / 100;
+    s.reverbSize = .25f + rev / 100 * .6f;
+    s.gainDb = raw.vol->load();
     return s;
 }
 
@@ -242,6 +257,9 @@ void PercProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
             const auto slot = padSound (pad);
             play (*sounds, slot.category, slot.index, message.getFloatVelocity(), m.samplePosition);
             flash[pad].store (message.getFloatVelocity());
+            // The buffer is in time order: the last note stored is the latest one played.
+            hits.store ((juce::uint64) ++hitCount << 32 | (juce::uint64) message.getNoteNumber() << 16
+                        | (juce::uint64) pad << 8 | (juce::uint64) message.getVelocity());
         }
         auto previews = [&] (int start, int count)
         {

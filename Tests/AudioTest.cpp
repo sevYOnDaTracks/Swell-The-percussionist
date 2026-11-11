@@ -108,6 +108,19 @@ int main()
                 require (render (p, .3, note).peak > .001f, "note " + juce::String (note) + " is silent");
                 require (p.takeFlash (PercProcessor::padForNote (note)) > 0, "note " + juce::String (note) + " did not light its pad");
             }
+            // What the window shows is the note really played, the latest in time, named as the piano roll names it.
+            require (PercProcessor::noteName (36) == "C1" && PercProcessor::noteName (60) == "C3", "note names (C3 = 60 outside FL Studio)");
+            {
+                juce::AudioBuffer<float> b (2, 256);
+                juce::MidiBuffer m;
+                m.addEvent (juce::MidiMessage::noteOn (10, 60, (juce::uint8) 100), 200); // later in the block, higher note
+                m.addEvent (juce::MidiMessage::noteOn (10, 51, (juce::uint8) 90), 10);   // earlier, higher pad (16)
+                const auto before = p.lastHit().count;
+                p.processBlock (b, m);
+                const auto hit = p.lastHit();
+                require (hit.count == before + 2, "every note counts");
+                require (hit.note == 60 && hit.pad == PercProcessor::padForNote (60) && hit.velocity == 100, "last hit is not the latest note");
+            }
             const auto before = p.padSound (3);
             for (int c = 0; c < categoryCount; ++c) p.selectCategory (c);
             const auto after = p.padSound (3);

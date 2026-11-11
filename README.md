@@ -3,12 +3,15 @@
 Instrument de percussions VST3 / AU / Standalone de la suite **Swell** (Swell-audio, by @sevyondatracks). JUCE 8 + CMake.
 
 > **v0.4** : un kit de 16 pads comme une MPC ou un drum rack, et toutes les notes MIDI jouent.
+> **v0.4.1** : la fenêtre affiche la note vraiment jouée (la dernière dans le temps), nommée comme dans le piano roll du DAW.
 
 ## Ce qu'il y a
 - **Kit de 16 pads** (4 x 4, pad 1 en bas à gauche). Chaque pad garde un son de n'importe quel onglet ; le kit est
   sauvegardé avec le projet, donc le piano roll joue toujours les mêmes sons, quel que soit l'onglet affiché.
-- **MIDI** : C1 à D#2 (notes 36 à 51 ; C3 à D#4 dans FL Studio) jouent les pads 1 à 16, et les 16 pads se répètent
-  sur tout le clavier : aucune note n'est muette.
+- **MIDI** : les notes 36 à 51 jouent les pads 1 à 16, et les 16 pads se répètent sur tout le clavier : aucune note
+  n'est muette. Attention, ils se répètent tous les 16 demi-tons, pas à chaque octave : C2 et C3 ne jouent pas le même pad.
+  Les noms des notes suivent le DAW : C1 à D#2 dans Ableton, Logic, Cubase, Studio One, Bitwig et Pro Tools (C3 = 60),
+  C2 à D#3 dans Reaper (C4 = 60), C3 à D#4 dans FL Studio (C5 = 60).
 - **Charger un son** : clique un pad (il joue et se sélectionne), choisis un onglet, puis clique un son de la liste :
   il est chargé dans le pad sélectionné. Haut du pad = doux, bas = fort.
 - **10 onglets** : Djembé, Congas, Talking, Percs, Toms, Rims, Shakers, Claps, Métal, FX. Chacun a sa photo.
@@ -44,10 +47,8 @@ et recompiler. Le pack renomme et range les fichiers pour que le dossier corresp
 `Resources/icon.png` (un djembé), dessinée par `python3 -I Tools/make_icon.py Resources/icon.png`.
 
 ## Build
-Mac : `./build-mac.sh`
-
-Pour réutiliser le JUCE déjà téléchargé par un autre projet :
-`cmake -S . -B build -DFETCHCONTENT_SOURCE_DIR_JUCE=../Swell-Acoustic-Guitar-/build/_deps/juce-src`
+Mac : `./build-mac.sh` (réutilise tout seul le JUCE de `../Swell-Acoustic-Guitar-` s'il est là, et recrée `build/` si
+le dossier du projet a changé de place)
 
 ## Crédits photos (provisoires)
 Wikimedia Commons, passées en noir et blanc par le plugin. **À remplacer avant la vente** : les licences CC BY-SA imposent de partager les œuvres dérivées sous la même licence. Vérifier aussi les logos de marque visibles sur certains instruments.

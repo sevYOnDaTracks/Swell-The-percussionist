@@ -33,7 +33,7 @@ public:
     void getStateInformation (juce::MemoryBlock&) override;
     void setStateInformation (const void*, int) override;
 
-    float value (const juce::String& id) const { return state.getRawParameterValue (id)->load(); }
+    float value (const juce::String& id) const { return state.getRawParameterValue (id)->load(); } // message thread
     void setValue (const juce::String& id, float v);
     int category() const { return juce::jlimit (0, categoryCount - 1, (int) value ("instrument")); }
     static int soundCount (int category) { return sampleLists[category].count; }
@@ -52,8 +52,8 @@ public:
     int visibleSound (int category, int n) const; // index of the n-th visible sound, -1 if none
 
     // The kit: 16 pads, each holding any sound of any category. Saved with the project, so the piano roll always plays
-    // the same sounds whatever the window shows. Every MIDI note plays a pad: C1 to D#2 (36 to 51, as an Ableton or
-    // FL drum rack), and the same 16 pads repeat over the whole keyboard.
+    // the same sounds whatever the window shows. Every MIDI note plays a pad: notes 36 to 51 (C1 to D#2 in Ableton, as a
+    // drum rack) play pads 1 to 16, and the same 16 pads repeat over the whole keyboard.
     struct Slot { int category = 0, index = 0; };
     Slot padSound (int pad) const { const int v = kit[(size_t) pad].load(); return { v / maxSounds, v % maxSounds }; }
     void setPadSound (int pad, int category, int index);
@@ -71,12 +71,30 @@ public:
     float takeFlash (int pad) { return flash[pad].exchange (0.f); }
     Slot lastSound() const { const int v = lastPlayed.load(); return { v / maxSounds, v % maxSounds }; }
 
+    // The last note received (the latest in time, not the highest pad), as the editor shows it. 'count' grows with
+    // every note, so the editor sees a note played twice in a row.
+    struct Hit { juce::uint32 count = 0; int note = -1, pad = 0, velocity = 0; };
+    Hit lastHit() const
+    {
+        const auto v = hits.load();
+        if (v == 0) return {};
+        return { (juce::uint32) (v >> 32), (int) ((v >> 16) & 0x7f), (int) ((v >> 8) & 0xff), (int) (v & 0xff) };
+    }
+
+    // A note's name as the host's piano roll writes it: C3 = 60 in Ableton, Logic, Cubase, Studio One, Bitwig and
+    // Pro Tools (so pad 1 = C1), C4 = 60 in Reaper (C2), C5 = 60 in FL Studio (C3).
+    static int middleCOctave();
+    static juce::String noteName (int note) { return juce::MidiMessage::getMidiNoteName (note, true, true, middleCOctave()); }
+
 private:
     FxChain::Settings fxSettings() const;
     void play (const SampleBank& sounds, int category, int index, float velocity, int offset);
     void resetKit();
     void loadFavourites();
     void saveFavourites() const;
+
+    // The parameters the audio thread reads, looked up once (a lookup by name allocates).
+    struct Raw { std::atomic<float> *tune, *decay, *sat, *cho, *fla, *dly, *rev, *vol; } raw {};
 
     SampleEngine engine;
     FxChain fx;
@@ -90,6 +108,8 @@ private:
     std::atomic<int> program { 1 }, lastPlayed { 0 };
     std::array<std::atomic<int>, padsPerPage> kit {};
     std::atomic<float> flash[padsPerPage] {};
+    std::atomic<juce::uint64> hits { 0 }; // count << 32 | note << 16 | pad << 8 | velocity (0-127)
+    juce::uint32 hitCount = 0;            // audio thread only
 
     std::array<std::array<std::atomic<bool>, maxSounds>, categoryCount> favourite {};
     std::atomic<bool> onlyFavourites { false };

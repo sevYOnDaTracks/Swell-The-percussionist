@@ -2,7 +2,7 @@
 #include "SampleIndex.h"
 
 // The tabs: their photo and where it sits in the 1180 px wide window. The sounds of each tab are in SampleIndex.h.
-constexpr int categoryCount = 10, padsPerPage = 16, firstPadNote = 36; // C2
+constexpr int categoryCount = 10, padsPerPage = 16, firstPadNote = 36; // C1 in Ableton or Logic, C2 in Reaper, C3 in FL Studio
 
 struct Category
 {

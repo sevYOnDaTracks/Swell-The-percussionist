@@ -110,12 +110,13 @@ public:
 private:
     void timerCallback() override;
     void refresh();
-    void showSound (PercProcessor::Slot, int pad, int velocity);
+    void showSound (PercProcessor::Slot, int pad, int note, int velocity);
 
     PercProcessor& processor;
     PercLook look;
     std::array<juce::Image, categoryCount> photos;
     int category = -1, selected = 0, shownFavourites = -1;
+    juce::uint32 shownHits = 0;
     std::array<int, padsPerPage> shownKit {};
     bool ready = false;
     juce::String bigName, subtitle;
