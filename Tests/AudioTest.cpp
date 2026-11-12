@@ -256,6 +256,89 @@ int main()
             require (e->createComponentSnapshot (e->getLocalBounds()).isValid(), "editor did not draw");
         }
 
+        // Kits: a ready-made kit fills the pads and sets the effects; "Vide" empties every pad (they stay silent);
+        // your own kit comes back from the menu; empty pads survive the project; the tutorial shows once.
+        {
+            PercProcessor p;
+            ready (p);
+            p.kitsFolder().deleteRecursively();
+            p.setTutorialSeen (false);
+            require (p.currentKit() == "Swell Mix" && ! p.kitModified(), "new instance is not on the default kit");
+
+            for (int k = 0; k < builtInKitCount; ++k)
+            {
+                p.applyKit (k);
+                require (p.currentKit() == PercProcessor::kitName (k) && p.getCurrentProgram() == builtInKits[k].preset, "kit name or effects");
+                std::set<int> sounds;
+                for (int pad = 0; pad < padsPerPage; ++pad)
+                {
+                    const auto& d = builtInKits[k].pads[pad];
+                    const auto slot = p.padSound (pad);
+                    require (d.category < 0 ? slot.empty() : slot.category == d.category, "kit pad " + juce::String (pad));
+                    if (! slot.empty()) sounds.insert (PercProcessor::code (slot));
+                }
+                require (builtInKits[k].pads[0].category < 0 || (int) sounds.size() == padsPerPage, PercProcessor::kitName (k) + " plays a sound twice");
+            }
+
+            const int emptyKit = builtInKitCount - 1;
+            p.applyKit (emptyKit);
+            render (p, 2);
+            for (int note : { 36, 40, 60 })
+                require (render (p, .2, note).peak == 0, "an empty pad plays");
+
+            {
+                std::unique_ptr<juce::AudioProcessorEditor> e (p.createEditor());
+                std::vector<PercView*> views;
+                std::vector<Pad*> pads;
+                collect (*e, views);
+                collect (*e, pads);
+                auto& view = *views[0];
+                require (view.tutorial().currentStep() == 0, "the tutorial does not show the first time");
+                for (int i = 0; i < 4; ++i) view.tutorial().next();
+                require (view.tutorial().currentStep() == 4, "tutorial steps");
+                view.tutorial().next();
+                require (view.tutorial().currentStep() < 0 && p.tutorialSeen(), "finishing the tutorial is not remembered");
+
+                // Loading a sound marks the kit as changed; changing kit then asks first.
+                juce::DragAndDropTarget::SourceDetails drop (SoundList::dragDescription (1, 3), nullptr, {});
+                pads[0]->itemDropped (drop);
+                require (p.kitModified() && view.kitText().contains ("modifi"), "the kit does not say it was changed");
+                view.chooseKit (2); // Afro Groove
+                require (view.prompt().isVisible() && p.padSound (0).category == 1 && p.padSound (0).index == 3, "kit replaced without asking");
+                view.prompt().accept();
+                require (p.currentKit() == "Afro Groove" && ! p.kitModified(), "kit not applied after the question");
+
+                // Save your own kit, change kit, load it back from the menu.
+                p.applyKit (emptyKit);
+                p.setPadSound (5, 7, 4);
+                p.markKitModified();
+                view.askToSaveKit();
+                require (view.prompt().isVisible(), "save does not ask a name");
+                view.prompt().accept(); // default name "Mon kit"
+                require (p.userKits().contains ("Mon kit") && p.currentKit() == "Mon kit", "kit not saved");
+                p.applyKit (1);
+                view.applyKitChoice (PercView::userKitId + p.userKits().indexOf ("Mon kit"));
+                require (p.padSound (5).category == 7 && p.padSound (5).index == 4 && p.padSound (0).empty(), "own kit not restored");
+                require (e->createComponentSnapshot (e->getLocalBounds()).isValid(), "editor did not draw");
+            }
+            {
+                std::unique_ptr<juce::AudioProcessorEditor> e (p.createEditor());
+                std::vector<PercView*> views;
+                collect (*e, views);
+                require (views[0]->tutorial().currentStep() < 0, "the tutorial shows again");
+                views[0]->startTutorial();
+                require (views[0]->tutorial().currentStep() == 0, "? does not replay the tutorial");
+            }
+
+            juce::MemoryBlock saved;
+            p.getStateInformation (saved);
+            PercProcessor b;
+            ready (b);
+            b.setStateInformation (saved.getData(), (int) saved.getSize());
+            require (b.padSound (0).empty() && b.padSound (5).category == 7 && b.currentKit() == "Mon kit", "empty pads or kit name not restored");
+            p.kitsFolder().deleteRecursively();
+        }
+
         // Soft and Clean is the second preset and the default settings.
         {
             PercProcessor p;

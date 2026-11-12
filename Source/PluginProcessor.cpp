@@ -18,17 +18,6 @@ const std::vector<Preset> presets
     { "Grande Salle",  0, 15,  0,  0, 55 },
 };
 
-// The kit of a new instance: a mix of every tab, low to high, so the pads play something useful right away.
-struct DefaultPad { int category; float where; }; // where: 0 = lowest sound of the tab, 1 = highest
-const DefaultPad defaultKit[padsPerPage]
-{
-    { 0, .1f }, { 0, .5f }, { 0, .9f },  // Djembé grave, médium, aigu
-    { 1, .25f }, { 1, .55f }, { 1, .85f }, // Congas
-    { 2, .2f }, { 2, .8f },               // Talking
-    { 4, .3f }, { 3, .5f }, { 5, .5f }, { 7, .8f }, // Tom, Perc, Rim, Clap
-    { 6, .5f }, { 6, .85f }, { 8, 0 }, { 9, .3f }, // Shakers, Cowbell, FX
-};
-
 juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
 {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
@@ -121,11 +110,102 @@ void PercProcessor::selectCategory (int c)
 
 void PercProcessor::resetKit()
 {
+    const auto& k = builtInKits[0];
     for (int pad = 0; pad < padsPerPage; ++pad)
     {
-        const auto& d = defaultKit[pad];
-        setPadSound (pad, d.category, juce::roundToInt (d.where * (float) (soundCount (d.category) - 1)));
+        const auto& d = k.pads[pad];
+        if (d.category < 0) clearPad (pad);
+        else setPadSound (pad, d.category, juce::roundToInt (d.where * (float) (soundCount (d.category) - 1)));
     }
+    kitLabel = kitName (0);
+    modified.store (false);
+}
+
+void PercProcessor::applyKit (int k)
+{
+    if (k < 0 || k >= builtInKitCount) return;
+    const auto& kitDef = builtInKits[k];
+    for (int pad = 0; pad < padsPerPage; ++pad)
+    {
+        const auto& d = kitDef.pads[pad];
+        if (d.category < 0) clearPad (pad);
+        else setPadSound (pad, d.category, juce::roundToInt (d.where * (float) (soundCount (d.category) - 1)));
+    }
+    setCurrentProgram (kitDef.preset);
+    setValue ("tune", 0);
+    setValue ("decay", 100);
+    kitLabel = kitName (k);
+    modified.store (false);
+}
+
+bool PercProcessor::findSound (const juce::String& id, int& category, int& index) const
+{
+    for (int c = 0; c < categoryCount; ++c)
+        for (int i = 0; i < soundCount (c); ++i)
+            if (id == sampleLists[c].entries[i].id) { category = c; index = i; return true; }
+    return false;
+}
+
+namespace { const char* const kitParams[] { "tune", "decay", "sat", "cho", "fla", "dly", "rev", "vol" }; }
+
+juce::StringArray PercProcessor::userKits() const
+{
+    juce::StringArray names;
+    for (const auto& f : kitsFolder().findChildFiles (juce::File::findFiles, false, "*.kit"))
+        if (auto xml = juce::XmlDocument::parse (f))
+            names.addIfNotAlreadyThere (xml->getStringAttribute ("name", f.getFileNameWithoutExtension()));
+    names.sortNatural();
+    return names;
+}
+
+bool PercProcessor::saveUserKit (const juce::String& rawName)
+{
+    const auto name = rawName.trim();
+    if (name.isEmpty()) return false;
+    juce::XmlElement xml ("KIT");
+    xml.setAttribute ("name", name);
+    xml.setAttribute ("program", program.load());
+    for (auto* id : kitParams) xml.setAttribute (id, value (id));
+    for (int pad = 0; pad < padsPerPage; ++pad)
+    {
+        const auto slot = padSound (pad);
+        xml.setAttribute ("pad" + juce::String (pad), slot.empty() ? juce::String ("-") : juce::String (sampleLists[slot.category].entries[slot.index].id));
+    }
+    kitsFolder().createDirectory();
+    if (! xml.writeTo (kitsFolder().getChildFile (juce::File::createLegalFileName (name) + ".kit"))) return false;
+    kitLabel = name;
+    modified.store (false);
+    return true;
+}
+
+bool PercProcessor::applyUserKit (const juce::String& name)
+{
+    for (const auto& f : kitsFolder().findChildFiles (juce::File::findFiles, false, "*.kit"))
+    {
+        auto xml = juce::XmlDocument::parse (f);
+        if (xml == nullptr || xml->getStringAttribute ("name", f.getFileNameWithoutExtension()) != name) continue;
+        for (int pad = 0; pad < padsPerPage; ++pad)
+        {
+            const auto id = xml->getStringAttribute ("pad" + juce::String (pad));
+            int c = 0, i = 0;
+            if (id == "-") clearPad (pad);
+            else if (findSound (id, c, i)) setPadSound (pad, c, i);
+        }
+        setCurrentProgram (xml->getIntAttribute ("program", program.load()));
+        for (auto* id : kitParams)
+            if (xml->hasAttribute (id)) setValue (id, (float) xml->getDoubleAttribute (id));
+        kitLabel = name;
+        modified.store (false);
+        return true;
+    }
+    return false;
+}
+
+void PercProcessor::setTutorialSeen (bool seen)
+{
+    const auto f = favouritesFile.getSiblingFile ("tuto-vu.txt");
+    if (seen) { f.getParentDirectory().createDirectory(); f.replaceWithText ("1"); }
+    else f.deleteFile();
 }
 
 void PercProcessor::setPadSound (int pad, int c, int index)
@@ -201,6 +281,7 @@ void PercProcessor::playSound (int c, int index, float velocity)
 
 void PercProcessor::play (const SampleBank& sounds, int c, int index, float velocity, int offset)
 {
+    if (c < 0 || c >= categoryCount) return; // empty pad
     const auto& list = sounds.sounds[(size_t) c];
     if (index < 0 || index >= (int) list.size()) return;
     engine.trigger (list[(size_t) index], { raw.tune->load(), raw.decay->load() }, velocity, offset);
@@ -303,11 +384,13 @@ void PercProcessor::getStateInformation (juce::MemoryBlock& dest)
     auto tree = state.copyState();
     tree.setProperty ("program", program.load(), nullptr);
     tree.setProperty ("favouritesOnly", favouritesOnly(), nullptr);
+    tree.setProperty ("kitName", kitLabel, nullptr);
+    tree.setProperty ("kitModified", kitModified(), nullptr);
     // The kit, by sound id (stays right if the sounds are renumbered in a later version).
     for (int pad = 0; pad < padsPerPage; ++pad)
     {
         const auto slot = padSound (pad);
-        tree.setProperty ("pad" + juce::String (pad), juce::String (sampleLists[slot.category].entries[slot.index].id), nullptr);
+        tree.setProperty ("pad" + juce::String (pad), slot.empty() ? juce::String ("-") : juce::String (sampleLists[slot.category].entries[slot.index].id), nullptr);
     }
     if (auto xml = tree.createXml())
         copyXmlToBinary (*xml, dest);
@@ -326,11 +409,13 @@ void PercProcessor::setStateInformation (const void* data, int size)
     for (int pad = 0; pad < padsPerPage; ++pad)
     {
         const auto id = tree.getProperty ("pad" + juce::String (pad)).toString();
-        if (id.isEmpty()) continue;
-        for (int c = 0; c < categoryCount; ++c)
-            for (int i = 0; i < soundCount (c); ++i)
-                if (id == sampleLists[c].entries[i].id) { setPadSound (pad, c, i); c = categoryCount; break; }
+        int c = 0, i = 0;
+        if (id == "-") clearPad (pad);
+        else if (id.isNotEmpty() && findSound (id, c, i)) setPadSound (pad, c, i);
     }
+    // Projects saved before 0.5 have no kit name: the window says "Kit du projet".
+    kitLabel = tree.getProperty ("kitName", "").toString();
+    modified.store (tree.getProperty ("kitModified", false));
 }
 
 juce::AudioProcessorEditor* PercProcessor::createEditor() { return new PercEditor (*this); }

@@ -38,6 +38,14 @@ juce::String soundName (int category, int index) { return text (sampleLists[cate
 // The note of a pad, named as the host's piano roll names it (C1 in Ableton or Logic, C2 in Reaper, C3 in FL Studio).
 juce::String padNote (int pad) { return PercProcessor::noteName (firstPadNote + pad); }
 
+// -1 if the name is not one of the ready-made kits (saving under that name would hide it).
+int builtInKitIndex (const juce::String& name)
+{
+    for (int k = 0; k < builtInKitCount; ++k)
+        if (PercProcessor::kitName (k) == name) return k;
+    return -1;
+}
+
 void star (juce::Graphics& g, juce::Rectangle<float> area, bool filled, juce::Colour colour)
 {
     juce::Path s;
@@ -109,9 +117,12 @@ void PercLook::drawButtonBackground (juce::Graphics& g, juce::Button& b, const j
         g.fillRoundedRectangle (r, 4);
         return;
     }
+    // A dark base so the buttons stay readable over the photo.
+    g.setColour (juce::Colour (0xb80b0b0c));
+    g.fillRoundedRectangle (r, 4);
     g.setColour (down ? orange.withAlpha (.3f) : over ? juce::Colour (0x18ffffff) : juce::Colours::transparentBlack);
     g.fillRoundedRectangle (r, 4);
-    g.setColour (b.isEnabled() ? juce::Colour (0xff3a3a40) : juce::Colour (0xff222226));
+    g.setColour (b.isEnabled() ? juce::Colour (over ? 0xff6a6a70 : 0xff4a4a50) : juce::Colour (0xff222226));
     g.drawRoundedRectangle (r, 4, 1);
 }
 
@@ -156,7 +167,7 @@ void Pad::paint (juce::Graphics& g)
     const float w = r.getWidth(), h = r.getHeight();
     label (g, juce::String (pad + 1), { 10, 7, 30, 14 }, 10, lit ? bg : selected ? orange : faint, juce::Justification::centredLeft, true);
     label (g, padNote (pad), { w - 50, 7, 40, 14 }, 10, lit ? bg : faint, juce::Justification::centredRight);
-    label (g, name, { 10, h / 2 - 12, w - 18, 18 }, 12.5f, lit ? bg : ink, juce::Justification::centredLeft, true);
+    label (g, name, { 10, h / 2 - 12, w - 18, 18 }, 12.5f, lit ? bg : empty ? faint : ink, juce::Justification::centredLeft, true);
     label (g, group, { 10, h / 2 + 6, w - 18, 14 }, 10, lit ? bg : muted);
     label (g, juce::String::charToString ((juce::juce_wchar) padKeys[pad]).toUpperCase(), { w - 30, h - 20, 20, 14 }, 9.5f,
            lit ? bg : juce::Colour (0xff4a4a50), juce::Justification::centredRight);
@@ -281,6 +292,183 @@ juce::var SoundList::getDragSourceDescription (const juce::SparseSet<int>& rows)
     return index < 0 ? juce::var() : dragDescription (processor.category(), index);
 }
 
+// ---------------------------------------------------------------- Prompt, Tutorial
+
+namespace
+{
+void styleButton (juce::TextButton& b, bool primary)
+{
+    b.setWantsKeyboardFocus (false);
+    b.setClickingTogglesState (false);
+    b.setToggleState (primary, juce::dontSendNotification); // the look draws a toggled button in orange
+}
+
+// Draws text on several lines, as many as it needs.
+void paragraph (juce::Graphics& g, const juce::String& s, juce::Rectangle<float> area, float size, juce::Colour colour)
+{
+    juce::AttributedString a;
+    a.append (s, juce::FontOptions (size), colour);
+    a.setLineSpacing (3);
+    a.setWordWrap (juce::AttributedString::byWord);
+    a.draw (g, area);
+}
+}
+
+Prompt::Prompt()
+{
+    styleButton (ok, true);
+    styleButton (cancel, false);
+    cancel.setButtonText ("Annuler");
+    ok.onClick = [this] { accept(); };
+    cancel.onClick = [this] { setVisible (false); };
+    field.setFont (juce::FontOptions (15.f));
+    field.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff0b0b0c));
+    field.setColour (juce::TextEditor::textColourId, ink);
+    field.setColour (juce::TextEditor::outlineColourId, juce::Colour (0xff3a3a40));
+    field.setColour (juce::TextEditor::focusedOutlineColourId, orange);
+    field.setColour (juce::TextEditor::highlightColourId, orange.withAlpha (.4f));
+    field.setColour (juce::CaretComponent::caretColourId, orange);
+    field.setIndents (10, 7);
+    field.onReturnKey = [this] { accept(); };
+    field.onEscapeKey = [this] { setVisible (false); };
+    addAndMakeVisible (ok);
+    addAndMakeVisible (cancel);
+    addChildComponent (field);
+}
+
+void Prompt::ask (const juce::String& t, const juce::String& m, const juce::String& okText, bool wantsField,
+                  const juce::String& initial, std::function<void (const juce::String&)> callback)
+{
+    title = t;
+    message = m;
+    withField = wantsField;
+    onOk = std::move (callback);
+    ok.setButtonText (okText);
+    field.setVisible (withField);
+    field.setText (initial, false);
+    resized();
+    setVisible (true);
+    toFront (false);
+    if (withField) { field.selectAll(); field.grabKeyboardFocus(); }
+    repaint();
+}
+
+void Prompt::accept()
+{
+    const auto value = field.getText().trim();
+    if (withField && value.isEmpty()) return;
+    setVisible (false);
+    if (auto f = std::move (onOk)) f (value);
+}
+
+static juce::Rectangle<int> promptBox (juce::Rectangle<int> bounds, bool withField)
+{
+    return bounds.withSizeKeepingCentre (440, withField ? 232 : 196);
+}
+
+void Prompt::resized()
+{
+    const auto box = promptBox (getLocalBounds(), withField);
+    field.setBounds (box.getX() + 24, box.getBottom() - 112, box.getWidth() - 48, 36);
+    ok.setBounds (box.getRight() - 24 - 120, box.getBottom() - 24 - 32, 120, 32);
+    cancel.setBounds (ok.getX() - 10 - 100, ok.getY(), 100, 32);
+}
+
+void Prompt::paint (juce::Graphics& g)
+{
+    g.fillAll (juce::Colours::black.withAlpha (.65f));
+    const auto box = promptBox (getLocalBounds(), withField).toFloat();
+    g.setColour (juce::Colour (0xff141416));
+    g.fillRoundedRectangle (box, 10);
+    g.setColour (orange);
+    g.drawRoundedRectangle (box.reduced (.5f), 10, 1.5f);
+    label (g, title, { box.getX() + 24, box.getY() + 20, box.getWidth() - 48, 24 }, 19, ink, juce::Justification::centredLeft, true);
+    paragraph (g, message, { box.getX() + 24, box.getY() + 54, box.getWidth() - 48, withField ? 60.f : 80.f }, 13, soft);
+}
+
+Tutorial::Tutorial()
+{
+    styleButton (nextButton, true);
+    styleButton (skipButton, false);
+    skipButton.setButtonText ("Passer le tuto");
+    nextButton.onClick = [this] { next(); };
+    skipButton.onClick = [this] { finish(); };
+    addAndMakeVisible (nextButton);
+    addAndMakeVisible (skipButton);
+}
+
+void Tutorial::start (std::vector<Step> s)
+{
+    steps = std::move (s);
+    step = steps.empty() ? -1 : 0;
+    setVisible (step >= 0);
+    toFront (false);
+    resized();
+    repaint();
+}
+
+void Tutorial::next()
+{
+    if (step < 0) return;
+    if (++step >= (int) steps.size()) { finish(); return; }
+    resized();
+    repaint();
+}
+
+void Tutorial::finish()
+{
+    step = -1;
+    setVisible (false);
+    if (onFinish) onFinish();
+}
+
+juce::Rectangle<int> Tutorial::bubble() const
+{
+    const int w = 420, h = 196, gap = 18;
+    const auto t = steps[(size_t) step].target;
+    int y = t.getBottom() + gap;                                   // below the target if it fits,
+    if (y + h > getHeight() - 8) y = t.getY() - gap - h;           // else above,
+    const int x = juce::jlimit (16, getWidth() - w - 16, t.getCentreX() - w / 2);
+    return { x, juce::jlimit (8, getHeight() - h - 8, y), w, h };
+}
+
+void Tutorial::resized()
+{
+    if (step < 0 || step >= (int) steps.size()) return;
+    const auto b = bubble();
+    nextButton.setButtonText (step == (int) steps.size() - 1 ? juce::String ("C'est parti !") : juce::String ("Suivant"));
+    nextButton.setBounds (b.getRight() - 20 - 130, b.getBottom() - 20 - 32, 130, 32);
+    skipButton.setBounds (b.getX() + 20, nextButton.getY(), 130, 32);
+    skipButton.setVisible (step < (int) steps.size() - 1);
+}
+
+void Tutorial::paint (juce::Graphics& g)
+{
+    if (step < 0 || step >= (int) steps.size()) return;
+    const auto& s = steps[(size_t) step];
+    const auto hole = s.target.toFloat().expanded (6);
+
+    // Everything dimmed but the part of the window this step is about.
+    juce::Path shade;
+    shade.addRectangle (getLocalBounds().toFloat());
+    shade.addRoundedRectangle (hole, 8);
+    shade.setUsingNonZeroWinding (false);
+    g.setColour (juce::Colours::black.withAlpha (.72f));
+    g.fillPath (shade);
+    g.setColour (orange);
+    g.drawRoundedRectangle (hole, 8, 2);
+
+    const auto b = bubble().toFloat();
+    g.setColour (juce::Colour (0xff141416));
+    g.fillRoundedRectangle (b, 10);
+    g.setColour (orange);
+    g.drawRoundedRectangle (b.reduced (.5f), 10, 1.5f);
+    label (g, juce::String::fromUTF8 ("\xc3\x89TAPE ") + juce::String (step + 1) + " / " + juce::String ((int) steps.size()),
+           { b.getX() + 20, b.getY() + 18, 200, 14 }, 10, orange, juce::Justification::centredLeft, true, .2f);
+    label (g, s.title, { b.getX() + 20, b.getY() + 36, b.getWidth() - 40, 26 }, 20, ink, juce::Justification::centredLeft, true);
+    paragraph (g, s.text, { b.getX() + 20, b.getY() + 70, b.getWidth() - 40, 80 }, 13.5f, soft);
+}
+
 // ---------------------------------------------------------------- Window
 
 PercView::PercView (PercProcessor& p)
@@ -326,7 +514,26 @@ PercView::PercView (PercProcessor& p)
     knobs.add (new Knob (p, "rev", "REVERB", percent));
     knobs.add (new Knob (p, "vol", "VOLUME", signedValue (" dB", 1), true));
     for (auto* k : knobs) addAndMakeVisible (k);
+    // Kits: menu, save, and the ? that replays the tutorial.
+    kitBox.setWantsKeyboardFocus (false);
+    kitBox.setTextWhenNothingSelected (text ("Kit du projet"));
+    kitBox.onChange = [this] { if (const int id = kitBox.getSelectedId(); id > 0) chooseKit (id); };
+    addAndMakeVisible (kitBox);
+    saveKitButton.setButtonText ("Sauver le kit");
+    saveKitButton.setWantsKeyboardFocus (false);
+    saveKitButton.onClick = [this] { askToSaveKit(); };
+    addAndMakeVisible (saveKitButton);
+    helpButton.setButtonText ("?");
+    helpButton.setWantsKeyboardFocus (false);
+    helpButton.setTooltip (text ("Revoir le tuto"));
+    helpButton.onClick = [this] { startTutorial(); };
+    addAndMakeVisible (helpButton);
+    rebuildKitMenu();
+
     addAndMakeVisible (licenceBadge);
+    addChildComponent (tour);
+    tour.onFinish = [this] { processor.setTutorialSeen (true); };
+    addChildComponent (question);
     addChildComponent (licencePanel); // shows itself when there is no valid licence
 
     setSize (width, height);
@@ -336,6 +543,7 @@ PercView::PercView (PercProcessor& p)
     showSound (p.padSound (0), 0, -1, -1);
     refresh();
     startTimerHz (60);
+    if (! p.tutorialSeen()) startTutorial(); // the first time the window opens
 }
 
 PercView::~PercView() { setLookAndFeel (nullptr); }
@@ -343,6 +551,9 @@ PercView::~PercView() { setLookAndFeel (nullptr); }
 void PercView::resized()
 {
     preset.setBounds (width - margin - 160, 22, 160, 30);
+    helpButton.setBounds (preset.getX() - 40, 22, 30, 30);
+    saveKitButton.setBounds (helpButton.getX() - 112, 22, 104, 30);
+    kitBox.setBounds (saveKitButton.getX() - 236, 22, 228, 30);
 
     const float tabWidth = ((float) width - margin * 2 - 6 * (categoryCount - 1)) / categoryCount;
     for (int i = 0; i < categoryCount; ++i)
@@ -366,6 +577,8 @@ void PercView::resized()
     for (int i = 0; i < knobs.size(); ++i)
         knobs[i]->setBounds (right + juce::roundToInt (((float) i + .5f) * slot) - 35, knobsY + 12, 70, 94);
     licenceBadge.setBounds (width / 2 - 180, height - 17, 360, 14); // milieu : les coins ont déjà la photo et la version
+    tour.setBounds (getLocalBounds());
+    question.setBounds (getLocalBounds());
     licencePanel.setBounds (getLocalBounds());
 }
 
@@ -384,16 +597,108 @@ void PercView::refresh()
     for (int i = 0; i < padsPerPage; ++i)
     {
         const auto slot = processor.padSound (i);
-        shownKit[(size_t) i] = slot.category * PercProcessor::maxSounds + slot.index;
+        shownKit[(size_t) i] = PercProcessor::code (slot);
         auto& pad = *pads[i];
-        pad.name = soundName (slot.category, slot.index);
-        pad.group = text (categories[slot.category].label);
+        pad.name = slot.empty() ? text ("Vide") : soundName (slot.category, slot.index);
+        pad.group = slot.empty() ? text ("Glisse un son ici") : text (categories[slot.category].label);
+        pad.empty = slot.empty();
         pad.selected = i == selected;
         pad.repaint();
     }
     favouritesButton.setToggleState (processor.favouritesOnly(), juce::dontSendNotification);
+    kitBox.setText (kitText(), juce::dontSendNotification);
+    preset.setSelectedId (processor.getCurrentProgram() + 1, juce::dontSendNotification);
     list.update();
     repaint();
+}
+
+juce::String PercView::kitText() const
+{
+    const auto name = processor.currentKit();
+    return (name.isEmpty() ? text ("Kit du projet") : name) + (processor.kitModified() ? text (" (modifi\xc3\xa9)") : juce::String());
+}
+
+void PercView::rebuildKitMenu()
+{
+    kitBox.clear (juce::dontSendNotification);
+    kitBox.addSectionHeading (text ("Kits Swell"));
+    for (int k = 0; k < builtInKitCount; ++k)
+        kitBox.addItem (PercProcessor::kitName (k), 1 + k);
+    const auto mine = processor.userKits();
+    if (! mine.isEmpty())
+    {
+        kitBox.addSeparator();
+        kitBox.addSectionHeading (text ("Mes kits"));
+        for (int i = 0; i < mine.size(); ++i)
+            kitBox.addItem (mine[i], userKitId + i);
+    }
+    kitBox.setText (kitText(), juce::dontSendNotification);
+}
+
+void PercView::chooseKit (int menuId)
+{
+    if (! processor.kitModified()) { applyKitChoice (menuId); return; }
+    const auto name = processor.currentKit().isEmpty() ? text ("ton kit") : text ("\xc2\xab ") + processor.currentKit() + text (" \xc2\xbb");
+    question.ask (text ("Changer de kit ?"),
+                  text ("Tu as chang\xc3\xa9 des pads de ") + name + text (". Le nouveau kit va remplacer les 16 pads. "
+                        "Pour garder le tien, annule puis clique \xc2\xab Sauver le kit \xc2\xbb."),
+                  text ("Changer"), false, {}, [this, menuId] (const juce::String&) { applyKitChoice (menuId); });
+    kitBox.setText (kitText(), juce::dontSendNotification); // stays on the current kit until the answer
+}
+
+void PercView::applyKitChoice (int menuId)
+{
+    if (menuId >= userKitId)
+    {
+        const auto mine = processor.userKits();
+        if (menuId - userKitId < mine.size()) processor.applyUserKit (mine[menuId - userKitId]);
+    }
+    else processor.applyKit (menuId - 1);
+    selected = 0;
+    showSound (processor.padSound (0), 0, -1, -1);
+    subtitle = text ("Kit \xc2\xab ") + processor.currentKit() + text (" \xc2\xbb charg\xc3\xa9  \xc2\xb7  ") + subtitle;
+    refresh();
+}
+
+void PercView::askToSaveKit()
+{
+    const auto current = processor.currentKit();
+    question.ask (text ("Sauver le kit"), text ("Donne-lui un nom : il sera dans le menu Kit, pour tous tes projets. "
+                                               "Le m\xc3\xaame nom remplace l'ancienne version."),
+                  text ("Sauver"), true, current.isEmpty() || builtInKitIndex (current) >= 0 ? text ("Mon kit") : current,
+                  [this] (const juce::String& name)
+                  {
+                      if (! processor.saveUserKit (name)) return;
+                      rebuildKitMenu();
+                      refresh();
+                      bigName = processor.currentKit();
+                      subtitle = text ("Kit sauv\xc3\xa9 : tu le retrouves dans le menu Kit, dans tous tes projets.");
+                      repaint();
+                  });
+}
+
+void PercView::startTutorial()
+{
+    const auto padsArea = pads[12]->getBounds().getUnion (pads[3]->getBounds());
+    const auto listArea = list.getBounds().withTop (sectionY - 6);
+    const auto knobsArea = knobs[0]->getBounds().getUnion (knobs[knobs.size() - 1]->getBounds()).expanded (4, 8);
+    tour.start ({
+        { kitBox.getBounds().getUnion (helpButton.getBounds()), text ("Choisis un kit"),
+          text ("Un kit remplit les 16 pads d'un coup, avec les effets qui vont avec. Prends \xc2\xab Vide \xc2\xbb "
+                "pour partir de z\xc3\xa9ro. Le bouton ? relance ce tuto.") },
+        { listArea, text ("\xc3\x89""coute les sons"),
+          text ("Choisis un onglet (Djemb\xc3\xa9, Congas\xe2\x80\xa6), puis clique un son dans la liste : tu l'entends, "
+                "et ton kit ne change pas.") },
+        { padsArea, text ("Mets-le dans un pad"),
+          text ("Glisse le son sur un pad, ou double-clique-le : il va dans le pad s\xc3\xa9lectionn\xc3\xa9 (cadre orange). "
+                "Ton kit est sauvegard\xc3\xa9 avec ton projet.") },
+        { padsArea, text ("Joue"),
+          text ("Clique un pad (en haut = doux, en bas = fort), tape A Z E R T Y U I et Q S D F G H J K, ou joue depuis ton "
+                "piano roll : ") + padNote (0) + text (" \xc3\xa0 ") + padNote (padsPerPage - 1) + text (" jouent les pads 1 \xc3\xa0 16.") },
+        { knobsArea.getUnion (preset.getBounds()), text ("R\xc3\xa8gle le son"),
+          text ("Tune, Decay et les effets. Le menu en haut \xc3\xa0 droite change d'ambiance. Content de ton kit ? "
+                "\xc2\xab Sauver le kit \xc2\xbb le garde pour tous tes projets.") },
+    });
 }
 
 void PercView::selectCategory (int c)
@@ -427,6 +732,7 @@ void PercView::loadSoundInto (int pad, int c, int index)
     if (pad < 0 || pad >= padsPerPage || c < 0 || c >= categoryCount || index < 0 || index >= PercProcessor::soundCount (c)) return;
     selected = pad;
     processor.setPadSound (pad, c, index);
+    processor.markKitModified();
     processor.playSound (c, index, .85f);
     showSound ({ c, index }, pad, -1, -1);
     subtitle = text ("Charg\xc3\xa9 dans le ") + subtitle;
@@ -447,6 +753,14 @@ void PercView::setFavouritesOnly (bool on)
 
 void PercView::showSound (PercProcessor::Slot s, int pad, int note, int velocity)
 {
+    if (s.empty())
+    {
+        bigName = text ("Pad vide");
+        subtitle = "Pad " + juce::String (pad + 1) + text ("  \xc2\xb7  ") + PercProcessor::noteName (note >= 0 ? note : firstPadNote + pad)
+                 + text ("  \xc2\xb7  glisse un son de la liste sur ce pad");
+        repaint (margin, 80, 560, 150);
+        return;
+    }
     bigName = soundName (s.category, s.index);
     // The note actually played (it can be far from the pad's own note: the 16 pads repeat over the keyboard).
     subtitle = "Pad " + juce::String (pad + 1) + text ("  \xc2\xb7  ") + PercProcessor::noteName (note >= 0 ? note : firstPadNote + pad)
@@ -461,8 +775,9 @@ void PercView::timerCallback()
     for (int i = 0; i < padsPerPage; ++i)
     {
         const auto slot = processor.padSound (i);
-        kitChanged |= shownKit[(size_t) i] != slot.category * PercProcessor::maxSounds + slot.index;
+        kitChanged |= shownKit[(size_t) i] != PercProcessor::code (slot);
     }
+    if (! kitBox.isPopupActive() && kitBox.getText() != kitText()) kitChanged = true; // e.g. the host restored a project
     if (kitChanged || processor.category() != category || processor.samplesReady() != ready
         || processor.favouriteCount (processor.category()) != shownFavourites || processor.favouritesOnly() != favouritesButton.getToggleState())
         refresh();
@@ -485,6 +800,7 @@ void PercView::timerCallback()
 
 bool PercView::keyPressed (const juce::KeyPress& key)
 {
+    if (tour.isVisible() && key == juce::KeyPress::escapeKey) { tour.finish(); return true; }
     const int i = juce::String (padKeys).indexOfChar (juce::CharacterFunctions::toLowerCase (key.getTextCharacter()));
     if (i < 0) return false;
     selectPad (i);
@@ -534,6 +850,8 @@ void PercView::paint (juce::Graphics& g)
                   juce::AffineTransform::scale (30.f / 38).translated ((float) margin, 22));
     label (g, "swell", { (float) margin + 38, 22, 80, 30 }, 21, ink);
     label (g, "THE PERCUSSIONIST", { (float) margin + 118, 22, 240, 30 }, 11, ink, juce::Justification::centredLeft, true, .3f);
+    label (g, "KIT", kitBox.getBounds().toFloat().withY (7).withHeight (12), 9, faint, juce::Justification::centredLeft, false, .2f);
+    label (g, "EFFETS", preset.getBounds().toFloat().withY (7).withHeight (12), 9, faint, juce::Justification::centredLeft, false, .2f);
 
     // Last sound played
     label (g, ready ? subtitle : text ("Chargement des sons\xe2\x80\xa6"), { (float) margin, 92, 500, 16 }, 12, ready ? muted : orange);

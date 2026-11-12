@@ -5,8 +5,16 @@ Instrument de percussions VST3 / AU / Standalone de la suite **Swell** (Swell-au
 > **v0.4** : un kit de 16 pads comme une MPC ou un drum rack, et toutes les notes MIDI jouent.
 > **v0.4.1** : la fenêtre affiche la note vraiment jouée (la dernière dans le temps), nommée comme dans le piano roll du DAW.
 > **v0.4.2** : cliquer un son de la liste l'écoute sans changer le kit ; double-clic ou glisser sur un pad pour le charger.
+> **v0.5.0** : des kits prêts à l'emploi (menu Kit), un kit Vide, tes propres kits (Sauver le kit) et un tuto au premier lancement.
 
 ## Ce qu'il y a
+- **Kits** (menu Kit, en haut) : un clic remplit les 16 pads et règle les effets. Swell Mix (par défaut), Afro Groove,
+  Congas Live, Talking & Djembé, Shakers & Claps, Percs & Métal, FX & Textures, et **Vide** pour partir de zéro. Si tu
+  as changé des pads, le plugin demande avant de les remplacer. **Sauver le kit** garde ton kit (sons + effets) dans
+  `~/Library/Application Support/Swell/The Percussionist/Kits/`, pour tous tes projets. Les kits sont définis dans
+  `Source/Kits.h`.
+- **Tuto** : au premier lancement, 5 étapes montrent comment s'en servir ; « Passer le tuto » ou Échap pour le fermer,
+  le bouton **?** le relance.
 - **Kit de 16 pads** (4 x 4, pad 1 en bas à gauche). Chaque pad garde un son de n'importe quel onglet ; le kit est
   sauvegardé avec le projet, donc le piano roll joue toujours les mêmes sons, quel que soit l'onglet affiché.
 - **MIDI** : les notes 36 à 51 jouent les pads 1 à 16, et les 16 pads se répètent sur tout le clavier : aucune note

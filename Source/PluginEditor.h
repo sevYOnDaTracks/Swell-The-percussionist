@@ -46,7 +46,7 @@ public:
     float getHeat() const { return heat; }
 
     juce::String name, group;
-    bool selected = false;
+    bool selected = false, empty = false;
 
 private:
     PercView& view;
@@ -100,6 +100,47 @@ private:
     double lastLoad = 0; // the click that ends a double-click must not play the sound once more
 };
 
+// A small question drawn inside the window (a plugin should not open windows of its own): a message, an optional text
+// field, and two buttons.
+class Prompt : public juce::Component
+{
+public:
+    Prompt();
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void ask (const juce::String& title, const juce::String& message, const juce::String& okText, bool withField,
+              const juce::String& initial, std::function<void (const juce::String&)> onOk);
+    void accept(); // as the OK button (tests)
+
+private:
+    juce::String title, message;
+    bool withField = false;
+    juce::TextEditor field;
+    juce::TextButton ok, cancel;
+    std::function<void (const juce::String&)> onOk;
+};
+
+// The guided tour shown the first time: a few steps, each pointing at a part of the window.
+class Tutorial : public juce::Component
+{
+public:
+    struct Step { juce::Rectangle<int> target; juce::String title, text; };
+    Tutorial();
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void start (std::vector<Step>);
+    void next();
+    void finish();
+    int currentStep() const { return step; } // -1 when hidden
+    std::function<void()> onFinish;
+
+private:
+    juce::Rectangle<int> bubble() const;
+    std::vector<Step> steps;
+    int step = -1;
+    juce::TextButton nextButton, skipButton;
+};
+
 // The whole window, drawn at a fixed size and scaled by the editor.
 class PercView : public juce::Component, public juce::DragAndDropContainer, private juce::Timer
 {
@@ -123,9 +164,20 @@ public:
     int shownCategory() const { return category; }
     int selectedPad() const { return selected; }
 
+    // Kits: the menu ids are 1 + a ready-made kit, or userKitId + one of your kits.
+    static constexpr int userKitId = 1000;
+    void chooseKit (int menuId);       // asks first when pads were changed since the kit was loaded
+    void applyKitChoice (int menuId);  // no question (tests)
+    void askToSaveKit();
+    void startTutorial();
+    Tutorial& tutorial() { return tour; }
+    Prompt& prompt() { return question; }
+    juce::String kitText() const;
+
 private:
     void timerCallback() override;
     void refresh();
+    void rebuildKitMenu();
     void showSound (PercProcessor::Slot, int pad, int note, int velocity);
 
     PercProcessor& processor;
@@ -140,9 +192,11 @@ private:
     juce::OwnedArray<Pad> pads;
     juce::OwnedArray<Tab> tabs;
     juce::OwnedArray<Knob> knobs;
-    juce::ComboBox preset;
-    juce::TextButton favouritesButton;
+    juce::ComboBox preset, kitBox;
+    juce::TextButton favouritesButton, saveKitButton, helpButton;
     SoundList list;
+    Tutorial tour;
+    Prompt question;
     swell::LicenceBadge licenceBadge;
     swell::LicencePanel licencePanel; // last child: covers everything until the plugin is activated
 };

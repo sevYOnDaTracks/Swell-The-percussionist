@@ -2,6 +2,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <thread>
 #include "SampleEngine.h"
+#include "Kits.h"
 #include "FxChain.h"
 #include "Licence/SwellLicence.h"
 
@@ -54,9 +55,29 @@ public:
     // The kit: 16 pads, each holding any sound of any category. Saved with the project, so the piano roll always plays
     // the same sounds whatever the window shows. Every MIDI note plays a pad: notes 36 to 51 (C1 to D#2 in Ableton, as a
     // drum rack) play pads 1 to 16, and the same 16 pads repeat over the whole keyboard.
-    struct Slot { int category = 0, index = 0; };
-    Slot padSound (int pad) const { const int v = kit[(size_t) pad].load(); return { v / maxSounds, v % maxSounds }; }
+    // A pad can be empty (category -1): it plays nothing.
+    struct Slot { int category = 0, index = 0; bool empty() const { return category < 0; } };
+    static int code (Slot s) { return s.empty() ? -1 : s.category * maxSounds + s.index; }
+    Slot padSound (int pad) const { const int v = kit[(size_t) pad].load(); return v < 0 ? Slot { -1, 0 } : Slot { v / maxSounds, v % maxSounds }; }
     void setPadSound (int pad, int category, int index);
+    void clearPad (int pad) { if (pad >= 0 && pad < padsPerPage) kit[(size_t) pad].store (-1); }
+
+    // Kits (message thread): a ready-made kit fills the 16 pads and sets the effects; your own kits are saved in the
+    // Kits folder next to the favourites, for every project. The name of the kit and whether pads were changed since
+    // are saved with the project.
+    static juce::String kitName (int k) { return juce::String::fromUTF8 (builtInKits[k].name); }
+    void applyKit (int k);
+    juce::StringArray userKits() const;
+    bool saveUserKit (const juce::String& name);
+    bool applyUserKit (const juce::String& name);
+    juce::File kitsFolder() const { return favouritesFile.getParentDirectory().getChildFile ("Kits"); }
+    juce::String currentKit() const { return kitLabel; } // empty: a project saved before kits existed
+    bool kitModified() const { return modified.load(); }
+    void markKitModified() { modified.store (true); }
+
+    // The tutorial shows once, the first time the window opens (kept next to the favourites).
+    bool tutorialSeen() const { return favouritesFile.getSiblingFile ("tuto-vu.txt").existsAsFile(); }
+    void setTutorialSeen (bool seen);
     static int padForNote (int note) { return ((note - firstPadNote) % padsPerPage + padsPerPage) % padsPerPage; }
 
     // Called from the editor, played on the next audio block: a pad of the kit, or any sound (preview from the list).
@@ -90,6 +111,7 @@ private:
     FxChain::Settings fxSettings() const;
     void play (const SampleBank& sounds, int category, int index, float velocity, int offset);
     void resetKit();
+    bool findSound (const juce::String& id, int& category, int& index) const;
     void loadFavourites();
     void saveFavourites() const;
 
@@ -114,6 +136,8 @@ private:
     std::array<std::array<std::atomic<bool>, maxSounds>, categoryCount> favourite {};
     std::atomic<bool> onlyFavourites { false };
     juce::File favouritesFile;
+    juce::String kitLabel;
+    std::atomic<bool> modified { false };
 
     // Sounds asked for by the list view: written on the message thread, read on the audio thread.
     juce::AbstractFifo listQueue { 64 };

@@ -1,5 +1,6 @@
 #include "../Source/PluginEditor.h"
 // Renders the window to a PNG: Snapshot <out.png> [category 0-9] [MIDI note played before the capture]
+// SNAPSHOT_TUTO=<step> shows a step of the tutorial, SNAPSHOT_KIT=<menu id> loads a kit first.
 int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI gui;
@@ -9,6 +10,16 @@ int main (int argc, char** argv)
     if (argc > 2) p.selectCategory (juce::String (argv[2]).getIntValue());
     std::unique_ptr<juce::AudioProcessorEditor> e (p.createEditor());
     e->setSize (1180, 730);
+    // The tutorial only when asked: SNAPSHOT_TUTO=<step, from 1>.
+    if (auto* view = dynamic_cast<PercView*> (e->getChildComponent (0)))
+    {
+        const int step = juce::SystemStats::getEnvironmentVariable ("SNAPSHOT_TUTO", "0").getIntValue();
+        view->startTutorial();
+        if (step <= 0) view->tutorial().setVisible (false);
+        for (int i = 1; i < step; ++i) view->tutorial().next();
+        if (const int kit = juce::SystemStats::getEnvironmentVariable ("SNAPSHOT_KIT", "0").getIntValue(); kit > 0)
+            view->applyKitChoice (kit);
+    }
     if (argc > 3)
     {
         p.prepareToPlay (48000, 256);

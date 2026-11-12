@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(SwellPercussionist VERSION 0.4.2 LANGUAGES C CXX)
+project(SwellPercussionist VERSION 0.5.0 LANGUAGES C CXX)
 if(MSVC)
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
