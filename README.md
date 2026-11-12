@@ -6,6 +6,7 @@ Instrument de percussions VST3 / AU / Standalone de la suite **Swell** (Swell-au
 > **v0.4.1** : la fenêtre affiche la note vraiment jouée (la dernière dans le temps), nommée comme dans le piano roll du DAW.
 > **v0.4.2** : cliquer un son de la liste l'écoute sans changer le kit ; double-clic ou glisser sur un pad pour le charger.
 > **v0.5.0** : des kits prêts à l'emploi (menu Kit), un kit Vide, tes propres kits (Sauver le kit) et un tuto au premier lancement.
+> **v0.5.1** : hors des pads 1 à 16, chaque note joue le pad de même nom (tous les F = pad 6) : une octave plus haut, c'est le même son. Dans un DAW, les touches du clavier d'ordi ne jouent plus les pads en double avec le DAW.
 
 ## Ce qu'il y a
 - **Kits** (menu Kit, en haut) : un clic remplit les 16 pads et règle les effets. Swell Mix (par défaut), Afro Groove,
@@ -17,15 +18,17 @@ Instrument de percussions VST3 / AU / Standalone de la suite **Swell** (Swell-au
   le bouton **?** le relance.
 - **Kit de 16 pads** (4 x 4, pad 1 en bas à gauche). Chaque pad garde un son de n'importe quel onglet ; le kit est
   sauvegardé avec le projet, donc le piano roll joue toujours les mêmes sons, quel que soit l'onglet affiché.
-- **MIDI** : les notes 36 à 51 jouent les pads 1 à 16, et les 16 pads se répètent sur tout le clavier : aucune note
-  n'est muette. Attention, ils se répètent tous les 16 demi-tons, pas à chaque octave : C2 et C3 ne jouent pas le même pad.
+- **MIDI** : les notes 36 à 51 jouent les pads 1 à 16. Partout ailleurs, chaque note joue le pad de même nom : tous les
+  C jouent le pad 1, tous les F le pad 6, etc. Une octave plus haut ou plus bas, c'est donc toujours le même son, et
+  aucune note n'est muette. Les pads 13 à 16 ne jouent que depuis leurs propres notes (48 à 51).
   Les noms des notes suivent le DAW : C1 à D#2 dans Ableton, Logic, Cubase, Studio One, Bitwig et Pro Tools (C3 = 60),
   C2 à D#3 dans Reaper (C4 = 60), C3 à D#4 dans FL Studio (C5 = 60).
 - **Écouter / charger un son** : choisis un onglet, puis **clique** un son de la liste pour l'écouter : le kit ne change
   pas, donc ce que joue ton piano roll non plus. Pour le mettre dans un pad : **double-clic** (il va dans le pad
   sélectionné) ou **glisse-le sur un pad**. Haut du pad = doux, bas = fort.
 - **10 onglets** : Djembé, Congas, Talking, Percs, Toms, Rims, Shakers, Claps, Métal, FX. Chacun a sa photo.
-- **Clavier** : `A Z E R T Y U I` et `Q S D F G H J K` jouent les pads 1 à 16.
+- **Clavier d'ordi** : dans l'app Standalone, `A Z E R T Y U I` et `Q S D F G H J K` jouent les pads 1 à 16. Dans un
+  DAW, le plugin laisse les touches au DAW (le clavier de saisie de FL les change en notes, qui jouent les pads).
 - **8 boutons** : Tune, Decay, Saturation, Chorus, Flangus, Delay, Reverb, Volume. Un effet à zéro est coupé. Le delay suit le tempo du DAW (croche pointée).
 - **7 presets** d'effets. Par défaut : **Soft and Clean** (Saturation 17 %, Reverb 2 %, le reste coupé).
 - **Favoris** : l'étoile d'un son dans la liste le garde ; **★ Favoris** n'affiche que les favoris de l'onglet. Ils sont

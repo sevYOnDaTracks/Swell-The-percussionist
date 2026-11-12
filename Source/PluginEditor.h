@@ -46,7 +46,7 @@ public:
     float getHeat() const { return heat; }
 
     juce::String name, group;
-    bool selected = false, empty = false;
+    bool selected = false, empty = false, showKey = false;
 
 private:
     PercView& view;
@@ -174,6 +174,11 @@ public:
     Prompt& prompt() { return question; }
     juce::String kitText() const;
 
+    // The computer keyboard plays the pads only in the standalone app. In a DAW the host turns those keys into notes
+    // itself (FL Studio's typing keyboard...): taking them too played two pads at once and changed the selected pad.
+    void setComputerKeys (bool);
+    bool computerKeys() const { return keysPlayPads; }
+
 private:
     void timerCallback() override;
     void refresh();
@@ -186,7 +191,7 @@ private:
     int category = -1, selected = 0, shownFavourites = -1;
     juce::uint32 shownHits = 0;
     std::array<int, padsPerPage> shownKit {};
-    bool ready = false;
+    bool ready = false, keysPlayPads = false;
     juce::String bigName, subtitle;
 
     juce::OwnedArray<Pad> pads;

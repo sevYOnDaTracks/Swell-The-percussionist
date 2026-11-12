@@ -1,6 +1,6 @@
 #include "../Source/PluginEditor.h"
 // Renders the window to a PNG: Snapshot <out.png> [category 0-9] [MIDI note played before the capture]
-// SNAPSHOT_TUTO=<step> shows a step of the tutorial, SNAPSHOT_KIT=<menu id> loads a kit first.
+// SNAPSHOT_TUTO=<step> shows a step of the tutorial, SNAPSHOT_KIT=<menu id> loads a kit first, SNAPSHOT_SCALE=2 doubles the size.
 int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI gui;
@@ -19,6 +19,9 @@ int main (int argc, char** argv)
         for (int i = 1; i < step; ++i) view->tutorial().next();
         if (const int kit = juce::SystemStats::getEnvironmentVariable ("SNAPSHOT_KIT", "0").getIntValue(); kit > 0)
             view->applyKitChoice (kit);
+        // Shop visuals never show whose licence this machine has.
+        for (auto* child : view->getChildren())
+            if (dynamic_cast<swell::LicenceBadge*> (child) != nullptr) child->setVisible (false);
     }
     if (argc > 3)
     {
@@ -30,7 +33,9 @@ int main (int argc, char** argv)
         // No message loop here: runs the editor's timer by hand for a moment, so it shows the note.
         for (int i = 0; i < 20; ++i) { juce::Thread::sleep (10); juce::Timer::callPendingTimersSynchronously(); }
     }
-    auto image = e->createComponentSnapshot (e->getLocalBounds(), true, 1.f);
+    // SNAPSHOT_SCALE=2 renders at twice the size (shop visuals).
+    const float scale = (float) juce::jlimit (1.0, 3.0, juce::SystemStats::getEnvironmentVariable ("SNAPSHOT_SCALE", "1").getDoubleValue());
+    auto image = e->createComponentSnapshot (e->getLocalBounds(), true, scale);
     juce::File out (juce::File::getCurrentWorkingDirectory().getChildFile (argc > 1 ? argv[1] : "snapshot.png"));
     out.deleteFile();
     juce::FileOutputStream s (out);

@@ -54,7 +54,8 @@ public:
 
     // The kit: 16 pads, each holding any sound of any category. Saved with the project, so the piano roll always plays
     // the same sounds whatever the window shows. Every MIDI note plays a pad: notes 36 to 51 (C1 to D#2 in Ableton, as a
-    // drum rack) play pads 1 to 16, and the same 16 pads repeat over the whole keyboard.
+    // drum rack) play pads 1 to 16; anywhere else a note plays the pad of the same name (every F plays pad 6, F1), so
+    // an octave higher or lower is always the same sound. Pads 13 to 16 only play from their own notes (48 to 51).
     // A pad can be empty (category -1): it plays nothing.
     struct Slot { int category = 0, index = 0; bool empty() const { return category < 0; } };
     static int code (Slot s) { return s.empty() ? -1 : s.category * maxSounds + s.index; }
@@ -78,7 +79,11 @@ public:
     // The tutorial shows once, the first time the window opens (kept next to the favourites).
     bool tutorialSeen() const { return favouritesFile.getSiblingFile ("tuto-vu.txt").existsAsFile(); }
     void setTutorialSeen (bool seen);
-    static int padForNote (int note) { return ((note - firstPadNote) % padsPerPage + padsPerPage) % padsPerPage; }
+    static int padForNote (int note)
+    {
+        if (note >= firstPadNote && note < firstPadNote + padsPerPage) return note - firstPadNote;
+        return ((note - firstPadNote) % 12 + 12) % 12; // the pad of the same note name, among pads 1 to 12
+    }
 
     // Called from the editor, played on the next audio block: a pad of the kit, or any sound (preview from the list).
     void playPad (int pad, float velocity);

@@ -169,8 +169,9 @@ void Pad::paint (juce::Graphics& g)
     label (g, padNote (pad), { w - 50, 7, 40, 14 }, 10, lit ? bg : faint, juce::Justification::centredRight);
     label (g, name, { 10, h / 2 - 12, w - 18, 18 }, 12.5f, lit ? bg : empty ? faint : ink, juce::Justification::centredLeft, true);
     label (g, group, { 10, h / 2 + 6, w - 18, 14 }, 10, lit ? bg : muted);
-    label (g, juce::String::charToString ((juce::juce_wchar) padKeys[pad]).toUpperCase(), { w - 30, h - 20, 20, 14 }, 9.5f,
-           lit ? bg : juce::Colour (0xff4a4a50), juce::Justification::centredRight);
+    if (showKey)
+        label (g, juce::String::charToString ((juce::juce_wchar) padKeys[pad]).toUpperCase(), { w - 30, h - 20, 20, 14 }, 9.5f,
+               lit ? bg : juce::Colour (0xff4a4a50), juce::Justification::centredRight);
 }
 
 void Pad::mouseDown (const juce::MouseEvent& e)
@@ -476,7 +477,6 @@ PercView::PercView (PercProcessor& p)
       licencePanel ({ bg, juce::Colour (0xff141416), ink, muted, orange, juce::Colour (0xffff6b5b) })
 {
     setLookAndFeel (&look);
-    setWantsKeyboardFocus (true);
 
     for (int i = 0; i < categoryCount; ++i)
     {
@@ -529,6 +529,7 @@ PercView::PercView (PercProcessor& p)
     helpButton.onClick = [this] { startTutorial(); };
     addAndMakeVisible (helpButton);
     rebuildKitMenu();
+    setComputerKeys (p.wrapperType == juce::AudioProcessor::wrapperType_Standalone);
 
     addAndMakeVisible (licenceBadge);
     addChildComponent (tour);
@@ -693,8 +694,9 @@ void PercView::startTutorial()
           text ("Glisse le son sur un pad, ou double-clique-le : il va dans le pad s\xc3\xa9lectionn\xc3\xa9 (cadre orange). "
                 "Ton kit est sauvegard\xc3\xa9 avec ton projet.") },
         { padsArea, text ("Joue"),
-          text ("Clique un pad (en haut = doux, en bas = fort), tape A Z E R T Y U I et Q S D F G H J K, ou joue depuis ton "
-                "piano roll : ") + padNote (0) + text (" \xc3\xa0 ") + padNote (padsPerPage - 1) + text (" jouent les pads 1 \xc3\xa0 16.") },
+          text ("Clique un pad (en haut = doux, en bas = fort)") + (keysPlayPads ? text (", tape A Z E R T Y U I et Q S D F G H J K") : juce::String())
+              + text (", ou joue depuis ton piano roll : ") + padNote (0) + text (" \xc3\xa0 ") + padNote (padsPerPage - 1) + text (" jouent les pads 1 \xc3\xa0 16. Plus haut ou plus bas, "
+                "chaque note joue le pad de m\xc3\xaame nom : tous les F jouent le pad 6.") },
         { knobsArea.getUnion (preset.getBounds()), text ("R\xc3\xa8gle le son"),
           text ("Tune, Decay et les effets. Le menu en haut \xc3\xa0 droite change d'ambiance. Content de ton kit ? "
                 "\xc2\xab Sauver le kit \xc2\xbb le garde pour tous tes projets.") },
@@ -798,9 +800,17 @@ void PercView::timerCallback()
     }
 }
 
+void PercView::setComputerKeys (bool on)
+{
+    keysPlayPads = on;
+    setWantsKeyboardFocus (on);
+    for (auto* pad : pads) { pad->showKey = on; pad->repaint(); }
+}
+
 bool PercView::keyPressed (const juce::KeyPress& key)
 {
     if (tour.isVisible() && key == juce::KeyPress::escapeKey) { tour.finish(); return true; }
+    if (! keysPlayPads) return false; // let the host have the key
     const int i = juce::String (padKeys).indexOfChar (juce::CharacterFunctions::toLowerCase (key.getTextCharacter()));
     if (i < 0) return false;
     selectPad (i);
@@ -857,7 +867,7 @@ void PercView::paint (juce::Graphics& g)
     label (g, ready ? subtitle : text ("Chargement des sons\xe2\x80\xa6"), { (float) margin, 92, 500, 16 }, 12, ready ? muted : orange);
     label (g, bigName, { (float) margin - 2, 112, 520, 70 }, 44, juce::Colours::white);
     label (g, text ("Le piano roll joue les pads 1 \xc3\xa0 16 de ") + padNote (0) + text (" \xc3\xa0 ") + padNote (padsPerPage - 1)
-               + text (", puis les 16 pads se r\xc3\xa9p\xc3\xa8tent sur tout le clavier."),
+               + text (". Ailleurs, chaque note joue le pad de m\xc3\xaame nom (tous les F = pad 6)."),
            { (float) margin, 186, 560, 18 }, 11.5f, faint);
     label (g, text ("Clic sur un son : tu l'\xc3\xa9""coutes, le kit ne change pas. Double-clic ou glisser sur un pad : il y est charg\xc3\xa9."),
            { (float) margin, 204, 560, 18 }, 11.5f, faint);

@@ -1,10 +1,11 @@
 """Builds the 1600 x 1600 shop visuals in the Swell style: logo, product name, plugin capture, orange glow.
 Usage: python3 Tools/make_cover.py <capture.png> <out.jpg> [caption]"""
+import os
 import sys
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 W = 1600
-LOGO = '/Users/sevyondatracks/Desktop/Swell-Audio/Swell-Ad-Libs-FX/Resources/swell_logo.png'
+LOGO = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'Swell-Ad-Libs-FX', 'Resources', 'swell_logo.png')
 ORANGE = (255, 138, 61)
 
 

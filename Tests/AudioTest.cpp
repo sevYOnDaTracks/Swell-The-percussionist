@@ -99,8 +99,15 @@ int main()
             PercProcessor p;
             ready (p);
             require (render (p, .3).peak == 0, "output without any hit");
-            require (PercProcessor::padForNote (36) == 0 && PercProcessor::padForNote (51) == 15 && PercProcessor::padForNote (52) == 0
-                     && PercProcessor::padForNote (35) == 15 && PercProcessor::padForNote (60) == 8 && PercProcessor::padForNote (0) == 12, "note to pad");
+            // 36 to 51: pads 1 to 16; elsewhere the pad of the same note name (F5 in FL = 65 = an F: pad 6).
+            require (PercProcessor::padForNote (36) == 0 && PercProcessor::padForNote (51) == 15 && PercProcessor::padForNote (48) == 12
+                     && PercProcessor::padForNote (52) == 4 && PercProcessor::padForNote (35) == 11 && PercProcessor::padForNote (60) == 0
+                     && PercProcessor::padForNote (65) == 5 && PercProcessor::padForNote (41) == 5 && PercProcessor::padForNote (0) == 0
+                     && PercProcessor::padForNote (127) == 7, "note to pad");
+            auto inZone = [] (int n) { return n >= firstPadNote && n < firstPadNote + padsPerPage; };
+            for (int note = 0; note + 12 < 128; ++note)
+                if (! inZone (note) && ! inZone (note + 12))
+                    require (PercProcessor::padForNote (note) == PercProcessor::padForNote (note + 12), "an octave apart plays another pad: " + juce::String (note));
             for (int note : { 0, 24, 36, 48, 60, 72, 80, 127 })
             {
                 render (p, 2);
@@ -251,6 +258,9 @@ int main()
             render (p, .05, firstPadNote + 3);
             require (p.lastSound().category == 2 && p.lastSound().index == 5, "MIDI does not play the loaded sound");
             render (p, 2);
+            // In a DAW the keys are the host's (they become notes there); only the standalone app plays pads with them.
+            require (! views[0]->computerKeys() && ! views[0]->keyPressed (juce::KeyPress ('q', {}, 'q')), "a key played a pad inside a DAW");
+            views[0]->setComputerKeys (true);
             require (views[0]->keyPressed (juce::KeyPress ('q', {}, 'q')), "key ignored");
             require (render (p, .4).peak > .05f && views[0]->selectedPad() == 8, "key does not play its pad");
             require (e->createComponentSnapshot (e->getLocalBounds()).isValid(), "editor did not draw");
